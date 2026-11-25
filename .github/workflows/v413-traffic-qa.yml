@@ -1,0 +1,19 @@
+name: Validate v4.13 traffic
+on:
+  push:
+    branches: [engineering/v4.13-moving-traffic]
+permissions:
+  contents: read
+jobs:
+  traffic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test test.cjs tests/moving-traffic.cjs
+      - run: npm install --no-save --no-package-lock playwright@1.51.1
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/sequential-mobile-smoke.cjs
