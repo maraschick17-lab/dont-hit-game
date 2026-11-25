@@ -1,0 +1,20 @@
+name: One-shot sequential campaign QA
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+jobs:
+  mobile-smoke:
+    if: github.head_ref == 'engineering/sequential-campaign-vehicle-audio'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-save --no-package-lock playwright@1.51.1
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/sequential-mobile-smoke.cjs
