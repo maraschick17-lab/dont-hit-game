@@ -7,7 +7,7 @@ const injection = "window.__qa={state:()=>({stage,running,airScroll,engineStage:
 assert.equal(candidate.split('draw()})();').length,2);
 assert(!/selectedStage|worldsMenu|data-world|UNLOCK WORLDS/.test(candidate));
 (async()=>{
- const browser=await chromium.launch({headless:true,args:['--autoplay-policy=no-user-gesture-required']});
+ const browser=await chromium.launch({headless:true,...(process.env.QA_CHROME_CHANNEL?{channel:process.env.QA_CHROME_CHANNEL}:{}),args:['--autoplay-policy=no-user-gesture-required']});
  try {
   for(const device of ['iPhone 13','iPhone SE']){
    const context=await browser.newContext({...devices[device],defaultBrowserType:'chromium'});
@@ -37,6 +37,11 @@ assert(!/selectedStage|worldsMenu|data-world|UNLOCK WORLDS/.test(candidate));
    await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:width*.75,y:height*.78}]});
    await page.waitForFunction(()=>window.__qa.state().targetPos>1.1);
    await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+   await cdp.detach();
+   // Chromium can suppress the next synthetic tap after a CDP drag. Reset the
+   // document between the steering and transition smoke scenarios.
+   await page.reload();
+   await page.locator('#play').tap();
    const sig=[];
    // Exercise each real transition via the finish screen. Timing is advanced by
    // test-only instrumentation; this is a smoke test, not a full play-through.
