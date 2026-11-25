@@ -28,8 +28,8 @@ jobs:
           grep -Fq '<title>RUSH TO ORBIT</title>' /tmp/live-index.html
           echo 'Production v4.13 matches all four release assets; GET only.'
   ios-toolchain:
-    runs-on: macos-26
-    timeout-minutes: 10
+    runs-on: xcode-27
+    timeout-minutes: 15
     steps:
       - name: Verify free standard runner and distribution SDK readiness
         shell: bash
@@ -40,6 +40,6 @@ jobs:
           xcrun --sdk iphonesimulator --show-sdk-version
           xcrun simctl list devices available
           sdk="$(xcrun --sdk iphoneos --show-sdk-version)"
-          test "${sdk%%.*}" -ge 26
+          test "${sdk%%.*}" -ge 27
           xcodebuild -showsdks
           echo 'SDK probe only: no signing, no submission, no secrets.'
