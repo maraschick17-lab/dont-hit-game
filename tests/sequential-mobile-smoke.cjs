@@ -40,27 +40,37 @@ assert(!/selectedStage|worldsMenu|data-world|UNLOCK WORLDS/.test(candidate));
    await cdp.detach();
    // Chromium can suppress the next synthetic tap after a CDP drag. Reset the
    // document between the steering and transition smoke scenarios.
-   await page.reload();
-   await page.locator('#play').tap();
+   await page.goto('about:blank');
+   await page.goto('https://qa.invalid/');
+   const tapStage=async(selector,expected)=>{
+    const button=page.locator(selector);
+    await button.waitFor({state:'visible'});
+    // Allow the previous touch gesture and frame to settle before the next tap.
+    await page.waitForTimeout(400);
+    await button.tap();
+    try{await page.waitForFunction(s=>window.__qa.state().stage===s&&window.__qa.state().running,expected,{timeout:3000});}
+    catch(e){console.error(device,selector,'expected stage',expected,'actual',JSON.stringify(await state()),'panel',await page.locator('#box').innerText(),'page errors',errors);throw e;}
+   };
+   await tapStage('#play',0);
    const sig=[];
    // Exercise each real transition via the finish screen. Timing is advanced by
    // test-only instrumentation; this is a smoke test, not a full play-through.
    for(let s=0;s<4;s++){
     await page.waitForFunction(s=>window.__qa.state().stage===s&&window.__qa.state().running,s);
-    const current=await state();assert.equal(current.engineStage,s);sig.push(JSON.stringify(current.signature));
+    const current=await state();console.log(device,'stage',s,'running',current.running);assert.equal(current.engineStage,s);sig.push(JSON.stringify(current.signature));
     if(s===2){const before=current.airScroll;await page.waitForFunction(before=>window.__qa.state().airScroll>before+3,before); }
     await page.evaluate(()=>window.__qa.complete());
     await page.locator('#nextstage').waitFor({state:'visible'});
     assert.deepEqual((await state()).campaign,Array.from({length:s+1},(_,i)=>i));
-    if(s<3)await page.locator('#nextstage').tap();
+    if(s<3)await tapStage('#nextstage',s+1);
    }
    assert.equal(new Set(sig).size,4,'four distinct engine buffers');
    assert.match(await page.locator('#box h1').innerText(),/YOU WIN/);
    assert.deepEqual(await page.evaluate(()=>window.__qaFinish.map(s=>s.stage)),[0,1,2,3]);
-   await page.locator('#nextstage').tap();assert.equal((await state()).stage,0);
-   await page.evaluate(()=>window.__qa.complete());await page.locator('#nextstage').waitFor({state:'visible'});await page.locator('#nextstage').tap();
+   await tapStage('#nextstage',0);assert.equal((await state()).stage,0);
+   await page.evaluate(()=>window.__qa.complete());await page.locator('#nextstage').waitFor({state:'visible'});await tapStage('#nextstage',1);
    assert.equal((await state()).stage,1);
-   await page.evaluate(()=>window.__qa.fail());await page.locator('#again').tap();assert.equal((await state()).stage,0);
+   await page.evaluate(()=>window.__qa.fail());await tapStage('#again',0);assert.equal((await state()).stage,0);
    assert.equal(await page.evaluate(()=>localStorage.getItem('dh_world')),'3','legacy save untouched');
    assert.deepEqual(errors,[]);
    console.log(device+': touch steering, legacy saves, sequence, distinct audio buffers, air motion, victory and retry passed');
