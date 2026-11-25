@@ -1,0 +1,19 @@
+{
+  "name": "RUSH TO ORBIT",
+  "short_name": "Rush to Orbit",
+  "description": "Race from highway to orbit in a four-stage arcade challenge.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#101421",
+  "theme_color": "#101421",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
