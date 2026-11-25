@@ -10,17 +10,22 @@ assert(!/selectedStage|worldsMenu|data-world|UNLOCK WORLDS/.test(candidate));
  const browser=await chromium.launch({headless:true,...(process.env.QA_CHROME_CHANNEL?{channel:process.env.QA_CHROME_CHANNEL}:{}),args:['--autoplay-policy=no-user-gesture-required']});
  try {
   for(const device of ['iPhone 13','iPhone SE']){
+   const errors=[];
+   const newScenario=async()=>{
    const context=await browser.newContext({...devices[device],defaultBrowserType:'chromium'});
-   const errors=[];const page=await context.newPage();
+   const page=await context.newPage();
    page.on('pageerror',e=>errors.push(String(e)));
    await page.route('**/*',async route=>{
     const url=route.request().url();
-    if(url==='https://qa.invalid/'){return route.fulfill({contentType:'text/html',body:candidate.replace('draw()})();',injection)})}
-    if(url==='https://qa.invalid/leaderboard.js'){return route.fulfill({contentType:'application/javascript',body:"window.rememberCampaign=c=>{window.__qaFinish=c};"})}
+    if(url==='http://127.0.0.1:4173/'){return route.fulfill({contentType:'text/html',body:candidate.replace('draw()})();',injection)})}
+    if(url==='http://127.0.0.1:4173/leaderboard.js'){return route.fulfill({contentType:'application/javascript',body:"window.rememberCampaign=c=>{window.__qaFinish=c};"})}
     return route.abort();
    });
-   await page.addInitScript(()=>{localStorage.setItem('dh_world','3');localStorage.setItem('dh_worlds','[true,true,true,true]');localStorage.setItem('dh_bank','1000')});
-   await page.goto('https://qa.invalid/');
+   await page.addInitScript(()=>{if(location.origin!=='http://127.0.0.1:4173')return;localStorage.setItem('dh_world','3');localStorage.setItem('dh_worlds','[true,true,true,true]');localStorage.setItem('dh_bank','1000')});
+   await page.goto('http://127.0.0.1:4173/');
+   return {context,page};
+   };
+   let {context,page}=await newScenario();
    await page.locator('#garage').tap();
    assert.equal(await page.locator('[data-world],#worlds').count(),0);
    await page.locator('#mute').tap();
@@ -40,8 +45,8 @@ assert(!/selectedStage|worldsMenu|data-world|UNLOCK WORLDS/.test(candidate));
    await cdp.detach();
    // Chromium can suppress the next synthetic tap after a CDP drag. Reset the
    // document between the steering and transition smoke scenarios.
-   await page.goto('about:blank');
-   await page.goto('https://qa.invalid/');
+   await context.close();
+   ({context,page}=await newScenario());
    const tapStage=async(selector,expected)=>{
     const button=page.locator(selector);
     await button.waitFor({state:'visible'});
