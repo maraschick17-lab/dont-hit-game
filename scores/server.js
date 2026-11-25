@@ -1,6 +1,7 @@
 import http from 'node:http';
 import {pathToFileURL} from 'node:url';
 import pg from 'pg';
+import {validStage} from './score-limits.mjs';
 
 const order = 'points DESC, milliseconds ASC, id ASC';
 const origin = 'https://dont-hit-game.onrender.com';
@@ -37,8 +38,7 @@ export async function createBoard(db) {
       if (!run || typeof run.initials !== 'string' || !/^[A-Z0-9]{1,3}$/.test(run.initials) ||
           typeof run.id !== 'string' || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(run.id) ||
           !Array.isArray(run.stages) || run.stages.length !== 4) return reply(400, {});
-      const valid = run.stages.every((s, i) => s?.stage === i && Number.isInteger(s.score) &&
-        s.score >= 500 && s.score <= 50000 && Number.isInteger(s.ms) && s.ms >= 29999 && s.ms <= 62600);
+      const valid = run.stages.every(validStage);
       if (!valid) return reply(400, {});
       const points = run.stages.reduce((total, s) => total + s.score, 0);
       const ms = run.stages.reduce((total, s) => total + s.ms, 0);
