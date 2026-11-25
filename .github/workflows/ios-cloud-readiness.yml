@@ -1,0 +1,45 @@
+name: Cloud release verification and iOS readiness
+on:
+  push:
+    branches: [engineering/ios-cloud-readiness]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  production-read-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: c22c1d22c8ed1f1df288a6f6e5e1ea6b99963157
+      - name: Match deployed v4.13 public assets against release commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          for asset in index.html leaderboard.js manifest.webmanifest icon.svg; do
+            path="$asset"
+            if [[ "$asset" == index.html ]]; then path=""; fi
+            curl --fail --silent --show-error --location --retry 3 --max-time 30 "https://dont-hit-game.onrender.com/${path}?release=c22c1d22c8ed1f1df288a6f6e5e1ea6b99963157" -o "/tmp/live-$asset"
+            cmp "$asset" "/tmp/live-$asset"
+            sha256sum "/tmp/live-$asset"
+          done
+          grep -Fq 'v4.13' /tmp/live-index.html
+          grep -Fq '<title>RUSH TO ORBIT</title>' /tmp/live-index.html
+          echo 'Production v4.13 matches all four release assets; GET only.'
+  ios-toolchain:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - name: Verify free standard runner and distribution SDK readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun --sdk iphonesimulator --show-sdk-version
+          xcrun simctl list devices available
+          sdk="$(xcrun --sdk iphoneos --show-sdk-version)"
+          test "${sdk%%.*}" -ge 26
+          xcodebuild -showsdks
+          echo 'SDK probe only: no signing, no submission, no secrets.'
