@@ -78,14 +78,14 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
         #if DEBUG && targetEnvironment(simulator)
         if isolatedScores && ProcessInfo.processInfo.arguments.contains("-seed-isolated-valid") {
             fixtureSeed = """
-            localStorage.setItem('dh_pending_campaign', JSON.stringify({
+            savePending(JSON.stringify({
               id:'00000000-0000-4000-8000-000000000001', initials:'QA',
               stages:[0,1,2,3].map(stage => ({stage,score:1500,ms:30000}))
             }));
             """
         } else if isolatedScores && ProcessInfo.processInfo.arguments.contains("-seed-isolated-invalid") {
             fixtureSeed = """
-            localStorage.setItem('dh_pending_campaign', JSON.stringify({
+            savePending(JSON.stringify({
               id:'00000000-0000-4000-8000-000000000002', initials:'QA',
               stages:[0,1,2,3].map(stage => ({stage,score:50000,ms:30000}))
             }));
@@ -98,16 +98,12 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
           // Exact endpoint only; Swift independently enforces the destination and verb.
           const mode = '\(scoreMode.rawValue)';
           const pendingKey = 'dh_pending_campaign';
-          const store = window.localStorage;
-          const originalGet = Storage.prototype.getItem;
-          const originalSet = Storage.prototype.setItem;
-          const originalRemove = Storage.prototype.removeItem;
           const saved = '\(savedPending)';
           let pendingValue = null;
           try {
             pendingValue = saved
               ? JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(saved), c => c.charCodeAt(0))))
-              : (mode === 'liveReadOnly' ? null : originalGet.call(store, pendingKey));
+              : (mode === 'live' || mode === 'offline' ? window.localStorage.getItem(pendingKey) : null);
           } catch (_) {}
           let pendingWrites = Promise.resolve();
           function savePending(value) {
@@ -117,24 +113,12 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
             // Observe the rejection here, but retain it for the POST durability gate.
             pendingWrites.catch(() => {});
           }
-          Storage.prototype.getItem = function(key) {
-            return this === store && String(key) === pendingKey
-              ? pendingValue : originalGet.apply(this, arguments);
-          };
-          Storage.prototype.setItem = function(key, value) {
-            if (this === store && String(key) === pendingKey) {
-              savePending(String(value));
-              return;
-            }
-            return originalSet.apply(this, arguments);
-          };
-          Storage.prototype.removeItem = function(key) {
-            if (this === store && String(key) === pendingKey) {
-              savePending(null);
-              return;
-            }
-            return originalRemove.apply(this, arguments);
-          };
+          // Explicit adapter: file:// storage access can throw at document start.
+          // Never let that abort bridge initialization or leak QA state across modes.
+          Object.defineProperty(window, 'rushNativePending', {value: Object.freeze({
+            get: () => pendingValue,
+            set: value => savePending(value === null ? null : String(value))
+          })});
           if (!saved && pendingValue !== null) savePending(pendingValue);
           if (mode === 'isolated') { \(fixtureSeed) }
           const scoreEndpoint = 'https://dont-hit-scores.onrender.com/scores';
@@ -275,6 +259,14 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
         }
         scoreSession.dataTask(with: request) { data, response, error in
             DispatchQueue.main.async {
+                #if DEBUG && targetEnvironment(simulator)
+                if self.isolatedScores {
+                    // No payload, initials, or credentials in diagnostics.
+                    let code = (error as NSError?)?.code ?? 0
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                    print("Isolated score transport: method=\(method) status=\(status) error=\(code)")
+                }
+                #endif
                 guard error == nil, let response = response as? HTTPURLResponse,
                       response.url == endpoint, let data = data, data.count <= 65536,
                       let body = String(data: data, encoding: .utf8),
