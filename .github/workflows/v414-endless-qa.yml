@@ -1,0 +1,53 @@
+name: Validate Endless Orbit candidate
+on:
+  push:
+    branches: [engineering/v4.14-endless-orbit, main]
+permissions:
+  contents: read
+jobs:
+  mobile:
+    if: github.ref_name != 'main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test test.cjs tests/moving-traffic.cjs
+      - run: npm install --no-save --no-package-lock playwright@1.51.1
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/endless-orbit-smoke.cjs
+      - run: node tests/sequential-mobile-smoke.cjs
+
+  deployed:
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Match live production files to released commit (read only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          for attempt in $(seq 1 24); do
+            ok=1
+            for file in index.html leaderboard.js manifest.webmanifest icon.svg; do
+              path="$file"
+              if [ "$file" = index.html ]; then path=""; fi
+              if ! curl -fsSL --max-time 12 "https://dont-hit-game.onrender.com/${path}?release=${GITHUB_SHA}&attempt=${attempt}" -o "$tmp/$file" || ! cmp -s "$file" "$tmp/$file"; then
+                ok=0
+                break
+              fi
+            done
+            if [ "$ok" = 1 ]; then
+              echo "Production assets byte-identical to $GITHUB_SHA"
+              sha256sum "$tmp"/*
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Production did not match released assets" >&2
+          exit 1
