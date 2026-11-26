@@ -11,11 +11,13 @@
   form.append(notice);
   let posting = false;
   let pending;
-  try { pending = JSON.parse(localStorage.getItem('dh_pending_campaign')); } catch {}
+  const nativePending = window.rushNativePending;
+  try { pending = JSON.parse(nativePending ? nativePending.get() : localStorage.getItem('dh_pending_campaign')); } catch {}
   function persist(run) {
     pending = run;
     try {
-      if (run) localStorage.setItem('dh_pending_campaign', JSON.stringify(run));
+      if (nativePending) nativePending.set(run ? JSON.stringify(run) : null);
+      else if (run) localStorage.setItem('dh_pending_campaign', JSON.stringify(run));
       else localStorage.removeItem('dh_pending_campaign');
     } catch {}
   }
