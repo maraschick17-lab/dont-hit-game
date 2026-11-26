@@ -1,0 +1,29 @@
+name: Owner stage QA validation (never deploy to production)
+on:
+  push:
+    branches: [engineering/owner-stage-qa]
+permissions:
+  contents: read
+jobs:
+  stage-qa:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test test.cjs tests/moving-traffic.cjs
+      - run: npm install --no-save --no-package-lock playwright@1.51.1
+      - run: npx playwright install --with-deps chromium
+      - name: Verify private QA auth, touch entry, reset and every destination
+        run: node tests/owner-stage-qa.cjs
+      - name: Export standalone isolated local copy
+        run: |
+          mkdir -p qa-artifact
+          node qa-server.cjs --export > qa-artifact/rush-to-orbit-owner-qa.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rush-to-orbit-owner-qa
+          path: qa-artifact/rush-to-orbit-owner-qa.html
+          retention-days: 7
