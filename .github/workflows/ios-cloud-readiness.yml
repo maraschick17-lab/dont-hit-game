@@ -58,6 +58,7 @@ jobs:
           cp index.html leaderboard.js manifest.webmanifest icon.svg ios/App/Web/
           cd ios
           xcodegen generate
+          /usr/libexec/PlistBuddy -c 'Print :UIApplicationSceneManifest:UISceneConfigurations:UIWindowSceneSessionRoleApplication:0:UISceneDelegateClassName' App/Info.plist
       - name: Build app for simulator
         shell: bash
         run: |
@@ -79,11 +80,22 @@ jobs:
           path: ios/DerivedData/Build/Products/Debug-iphonesimulator/RushToOrbit.app
           retention-days: 3
           if-no-files-found: warn
+      - name: Export native failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          mkdir -p ios/NativeDiagnostics
+          if [[ -d ios/NativeSmoke.xcresult ]]; then
+            xcrun xcresulttool get test-results summary --path ios/NativeSmoke.xcresult > ios/NativeDiagnostics/summary.json || true
+            xcrun xcresulttool export diagnostics --path ios/NativeSmoke.xcresult --output-path ios/NativeDiagnostics/exported || true
+          fi
       - name: Preserve native test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: rush-to-orbit-native-smoke
-          path: ios/NativeSmoke.xcresult
+          path: |
+            ios/NativeSmoke.xcresult
+            ios/NativeDiagnostics/
           retention-days: 3
           if-no-files-found: warn
