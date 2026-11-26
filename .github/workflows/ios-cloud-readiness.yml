@@ -132,6 +132,12 @@ jobs:
           test "$(grep -c '^INSERT ' /tmp/rush-isolated-scores.log)" = 1
           curl --fail --silent http://127.0.0.1:18081/scores | python3 -c 'import json,sys; assert json.load(sys.stdin)==[{"initials":"QA","points":6000,"milliseconds":120000}]'
           test "$test_exit" = 0
+      - name: Export authentic native store screenshot candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun xcresulttool export attachments --path ios/NativeSmoke.xcresult --output-path /tmp/rush-native-attachments
+          python3 ios/qa/export-store-captures.py /tmp/rush-native-attachments ios/StoreCaptureCandidates
       - name: Preserve unsigned simulator application
         if: always()
         uses: actions/upload-artifact@v4
@@ -157,6 +163,7 @@ jobs:
           path: |
             ios/NativeSmoke.xcresult
             ios/NativeDiagnostics/
+            ios/StoreCaptureCandidates/
             /tmp/rush-isolated-scores.log
           retention-days: 3
           if-no-files-found: warn

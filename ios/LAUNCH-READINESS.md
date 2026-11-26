@@ -9,6 +9,12 @@
 - Approved rollback branch MM-approved-v4.8 still resolves to cc5c50c7bf950132ed0baca0d06355de34618ec5.
 - Full native campaign, physical haptics, signed-device networking, all destination visuals and owner playtest remain open. Native retention test uses a debug-only unlock fixture; do not report it as a full native campaign win.
 
+## Native campaign milestone — November 26
+
+Candidate 21a51143f5b073801a71456448c8fd1ba46a36aa, [run 45824848553](https://github.com/maraschick17-lab/dont-hit-game/actions/runs/45824848553): all three jobs passed, including five XCTest cases with zero failures. Native WKWebView completed all four stages in 120.0 seconds on attempt 1, earned Endless Orbit from a fresh save and reopened it after relaunch. Stage buttons used XCTest touches; steering was synthetic DOM pointer input in a simulator-only instrumented asset, not physical iPhone touch. Unsigned device bundle was built before instrumentation and checked against unmodified source. Production GET and isolated score retry/validation passed again. Six named campaign/victory/Endless screenshot attachments were captured in [native smoke evidence](https://github.com/maraschick17-lab/dont-hit-game/actions/runs/45824848553/artifacts/15120279073); [unsigned device binary](https://github.com/maraschick17-lab/dont-hit-game/actions/runs/45824848553/artifacts/15120560596). Both expire November 29. The older checkpoint above is historical; full native simulator campaign is now passed, not the physical device gate.
+
+Added an attachment export step restricted to the earned campaign test, keeping only four stages, earned victory and earned Endless Orbit. No live leaderboard screenshots or fixture-unlock screenshots selected. The original PNGs and dimension/alpha/hash inventory are candidates, not approved store media; inspect them visually and validate final opaque RGB format. Apple currently requires at least one Dynamic Island medium iPhone screenshot (1179 x 2556 or 1206 x 2622 portrait), no alpha, up to ten per size: https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications . No iPad set needed for the current iPhone-only target. No changes to gameplay or signing. New export must pass cloud QA before claiming direct PNG artifacts exist.
+
 ## Critical path: internal TestFlight, target December 1
 
 Dot coordinates the following in an owner-controlled Apple session. No credentials, signing keys or codes in chat, repository, artifacts or logs.
