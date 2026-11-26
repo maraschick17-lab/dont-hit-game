@@ -1,0 +1,5 @@
+RushToOrbit.xcodeproj/
+App/Web/
+App/Info.plist
+DerivedData/
+*.xcresult
