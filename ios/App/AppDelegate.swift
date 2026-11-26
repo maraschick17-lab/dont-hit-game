@@ -1,5 +1,8 @@
 import UIKit
 import WebKit
+#if DEBUG && targetEnvironment(simulator)
+import OSLog
+#endif
 
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -45,6 +48,9 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
         return .offline
     }
     private var isolatedScores: Bool { scoreMode == .isolated }
+    #if DEBUG && targetEnvironment(simulator)
+    private static let qaLog = Logger(subsystem: "com.maraschick.rushtoorbit.qa", category: "score-transport")
+    #endif
     // file:// localStorage has no guaranteed persistent origin across launches.
     // Keep only the pending campaign in a small atomic native file; all other
     // storage keys retain their existing behavior. QA data never shares this file.
@@ -312,6 +318,11 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
             }
             return
         }
+        #if DEBUG && targetEnvironment(simulator)
+        if message.name == "nativeScore" {
+            Self.qaLog.notice("Score bridge received; mode=\(self.scoreMode.rawValue, privacy: .public) main=\(message.frameInfo.isMainFrame, privacy: .public) bundled=\(message.frameInfo.request.url == self.gameURL, privacy: .public)")
+        }
+        #endif
         guard scoreMode != .offline, message.name == "nativeScore", message.frameInfo.isMainFrame,
               message.frameInfo.request.url == gameURL,
               let payload = message.body as? [String: Any],
@@ -343,7 +354,7 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
                     // No payload, initials, or credentials in diagnostics.
                     let code = (error as NSError?)?.code ?? 0
                     let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                    print("Native QA score transport: mode=\(self.scoreMode.rawValue) method=\(method) status=\(status) error=\(code)")
+                    Self.qaLog.notice("Score response mode=\(self.scoreMode.rawValue, privacy: .public) method=\(method, privacy: .public) status=\(status, privacy: .public) error=\(code, privacy: .public) expectedURL=\(response?.url == endpoint, privacy: .public)")
                 }
                 #endif
                 guard error == nil, let response = response as? HTTPURLResponse,

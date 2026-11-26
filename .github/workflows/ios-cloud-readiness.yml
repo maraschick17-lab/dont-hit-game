@@ -111,13 +111,17 @@ jobs:
           test "$ready" = 1
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" ios/App/Info.plist
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" ios/App/Info.plist
-          xcodebuild -project ios/RushToOrbit.xcodeproj -scheme RushToOrbit -configuration Debug -destination "platform=iOS Simulator,id=$device" -derivedDataPath ios/DerivedData -resultBundlePath ios/NativeSmoke.xcresult CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO test
-          # This runs before the server exits and is required for a green job.
+          test_exit=0
+          xcodebuild -project ios/RushToOrbit.xcodeproj -scheme RushToOrbit -configuration Debug -destination "platform=iOS Simulator,id=$device" -derivedDataPath ios/DerivedData -resultBundlePath ios/NativeSmoke.xcresult CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO test || test_exit=$?
+          # Report bridge receipt and HTTP status/error without logging payloads.
+          xcrun simctl spawn "$device" log show --last 25m --style compact --predicate 'subsystem == "com.maraschick.rushtoorbit.qa"' || true
+          # Check isolated backend even after XCTest failure; both gates must pass.
           cat /tmp/rush-isolated-scores.log
           grep -Fxq 'INSERT QA first' /tmp/rush-isolated-scores.log
           grep -Fxq 'RETRY QA identical' /tmp/rush-isolated-scores.log
           test "$(grep -c '^INSERT ' /tmp/rush-isolated-scores.log)" = 1
           curl --fail --silent http://127.0.0.1:18081/scores | python3 -c 'import json,sys; assert json.load(sys.stdin)==[{"initials":"QA","points":6000,"milliseconds":120000}]'
+          test "$test_exit" = 0
       - name: Preserve unsigned simulator application
         if: always()
         uses: actions/upload-artifact@v4

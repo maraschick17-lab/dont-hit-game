@@ -1,5 +1,17 @@
 import XCTest
 
+// Verify real touch opened the modal before diagnosing network failures.
+private func openScoreboard(_ app: XCUIApplication, timeout: TimeInterval = 25) {
+    let button = app.buttons["GLOBAL LEADERBOARD"]
+    XCTAssertTrue(button.waitForExistence(timeout: timeout), "Leaderboard menu missing")
+    let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: button)
+    XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed, "Leaderboard button not hittable")
+    button.tap()
+    let opened = app.buttons["BACK"].waitForExistence(timeout: 8)
+    if !opened { print("Leaderboard modal failed to open after real touch: \(app.debugDescription)") }
+    XCTAssertTrue(opened, "Leaderboard modal did not open after real touch")
+}
+
 final class OfflineSmoke: XCTestCase {
     func testBundledGameAndOfflineScoreboard() throws {
         let app = XCUIApplication()
@@ -30,17 +42,18 @@ final class OfflineSmoke: XCTestCase {
 
 final class IsolatedScoreSmoke: XCTestCase {
     func testRealHTTPRetryAndValidationWithoutProduction() throws {
+        continueAfterFailure = false
         let app = XCUIApplication()
         func openBoard(_ seed: String? = nil) {
             app.launchArguments = ["-isolated-scores"] + (seed.map { [$0] } ?? [])
             app.launch()
-            let button = app.buttons["GLOBAL LEADERBOARD"]
-            XCTAssertTrue(button.waitForExistence(timeout: 25))
-            button.tap()
+            openScoreboard(app)
         }
         func status(_ message: String, timeout: TimeInterval = 15) -> XCUIElement {
             let value = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", message)).firstMatch
-            XCTAssertTrue(value.waitForExistence(timeout: timeout), "Missing status: " + message)
+            let found = value.waitForExistence(timeout: timeout)
+            if !found { print("Score status missing; UI tree: \(app.debugDescription)") }
+            XCTAssertTrue(found, "Missing status: " + message)
             return value
         }
         func post() {
@@ -72,16 +85,17 @@ final class IsolatedScoreSmoke: XCTestCase {
 
 final class ProductionScoreReadOnlySmoke: XCTestCase {
     func testActualNativeHTTPSLeaderboardReadWithoutPosting() throws {
+        continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-production-score-read-only"]
         app.launch()
-        let board = app.buttons["GLOBAL LEADERBOARD"]
-        XCTAssertTrue(board.waitForExistence(timeout: 25))
-        board.tap()
+        openScoreboard(app)
         let available = app.staticTexts.containing(NSPredicate(
             format: "label == %@ OR label == %@", "Top campaign finishes", "First place is open."
         )).firstMatch
-        XCTAssertTrue(available.waitForExistence(timeout: 70), "Native production HTTPS GET failed")
+        let found = available.waitForExistence(timeout: 70)
+        if !found { print("Production board status missing; UI tree: \(app.debugDescription)") }
+        XCTAssertTrue(found, "Native production HTTPS GET failed")
         XCTAssertFalse(app.buttons["POST MY FINISH"].exists)
         app.terminate()
     }
