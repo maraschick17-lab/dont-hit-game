@@ -224,6 +224,13 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
           } catch (_) {}
         })();
         """
+        #if DEBUG && targetEnvironment(simulator)
+        if retentionQA && ProcessInfo.processInfo.arguments.contains("-native-campaign-qa") {
+            config.userContentController.addUserScript(WKUserScript(
+                source: "Object.defineProperty(window, '__nativeCampaignQAEnabled', {value:true})",
+                injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
+        #endif
         config.userContentController.addUserScript(WKUserScript(source: bridge, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.userContentController.add(self, name: "gameHaptic")
         config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "pendingCampaign")

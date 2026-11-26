@@ -139,3 +139,78 @@ final class RetentionSmoke: XCTestCase {
         app.terminate()
     }
 }
+
+
+final class NativeCampaignSmoke: XCTestCase {
+    // Real-duration WKWebView game loop, actual stage-button XCTest touches
+    // and synthetic DOM pointer steering; not a physical-device touch test.
+    // No seeded unlock or mutation of progress, fuel, score, RNG or collision.
+    func testNativeFourStageCampaignEarnsUnlock() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        let play = app.buttons["LET'S GO"]
+        let endless = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "ENDLESS ORBIT")).firstMatch
+        func capture(_ name: String) {
+            let image = XCTAttachment(screenshot: app.screenshot())
+            image.name = name
+            image.lifetime = .keepAlways
+            add(image)
+        }
+        var lastFailure = "campaign did not start"
+        for attempt in 1...2 {
+            app.launchArguments = ["-retention-qa", "-reset-retention-qa", "-native-campaign-qa"]
+            app.launch()
+            XCTAssertTrue(play.waitForExistence(timeout: 25))
+            XCTAssertFalse(endless.exists, "Fresh save must not skip campaign")
+            play.tap()
+            var completed = true
+            for (stage, label) in ["ROAD", "SEA", "AIR", "SPACE"].enumerated() {
+                let hud = app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
+                guard hud.waitForExistence(timeout: 8) else {
+                    lastFailure = "missing stage \(stage) HUD"
+                    completed = false
+                    break
+                }
+                capture("Native campaign attempt \(attempt) stage \(stage)")
+                let next = app.buttons[stage == 3 ? "PLAY AGAIN" : "NEXT STAGE"]
+                let crash = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "TRY AGAIN")).firstMatch
+                let deadline = Date().addingTimeInterval(70)
+                while Date() < deadline && !next.exists && !crash.exists {
+                    Thread.sleep(forTimeInterval: 0.5)
+                }
+                guard next.exists && !crash.exists else {
+                    lastFailure = "stage \(stage) failed or timed out"
+                    capture("Native campaign failure attempt \(attempt) stage \(stage)")
+                    completed = false
+                    break
+                }
+                if stage < 3 { next.tap() }
+            }
+            if completed {
+                let win = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "YOU WIN")).firstMatch
+                XCTAssertTrue(win.waitForExistence(timeout: 5))
+                let record = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "campaign points")).firstMatch
+                XCTAssertTrue(record.waitForExistence(timeout: 5))
+                let raw = record.label.split(separator: "·").last.map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
+                let duration = Double(raw.replacingOccurrences(of: "s", with: "")) ?? 0
+                XCTAssertGreaterThanOrEqual(duration, 119.6, "All four stages must finish in real game time")
+                XCTAssertTrue(endless.exists, "Victory must earn Endless Orbit")
+                capture("Native earned victory")
+                print("Native real-duration campaign passed: \(duration) seconds, attempt \(attempt)")
+                Thread.sleep(forTimeInterval: 1)
+                app.terminate()
+                app.launchArguments = ["-retention-qa"]
+                app.launch()
+                XCTAssertTrue(endless.waitForExistence(timeout: 25), "Earned unlock persists after relaunch")
+                endless.tap()
+                XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "ORBIT")).firstMatch.waitForExistence(timeout: 5))
+                capture("Native earned Endless Orbit")
+                app.terminate()
+                return
+            }
+            print("Native real-duration campaign attempt \(attempt): \(lastFailure)")
+            app.terminate()
+        }
+        XCTFail(lastFailure)
+    }
+}

@@ -80,6 +80,16 @@ jobs:
           path: /tmp/rush-to-orbit-unsigned-device.zip
           retention-days: 3
           if-no-files-found: error
+      - name: Instrument only simulator QA asset for a real-duration native campaign
+        shell: bash
+        run: |
+          set -euo pipefail
+          release=ios/DeviceDerivedData/Build/Products/Release-iphoneos/RushToOrbit.app/Web/index.html
+          cmp index.html "$release"
+          ! grep -Fq '__nativeCampaignQAEnabled' "$release"
+          node ios/qa/native-campaign-driver.cjs ios/App/Web/index.html
+          grep -Fq '__nativeCampaignQAEnabled' ios/App/Web/index.html
+          ! grep -Fq '__nativeCampaignQAEnabled' index.html
       - name: Checkout exact deployed score validator for isolated tests
         uses: actions/checkout@v4
         with:
