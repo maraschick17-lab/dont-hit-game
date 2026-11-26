@@ -19,7 +19,7 @@ for test in manifest:
         if item.get("isAssociatedWithFailure"):
             continue
         name = item.get("suggestedHumanReadableName", "")
-        match = re.match(r"^Native campaign attempt ([12]) stage ([0-3])\b", name)
+        match = re.match(r"^Native campaign attempt ([12]) stage ([0-3])(?=$|[_. -])", name)
         if match:
             attempt, stage = map(int, match.groups())
             stages.setdefault(attempt, {})[stage] = item
