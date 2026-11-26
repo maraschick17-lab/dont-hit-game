@@ -41,6 +41,14 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
         return false
         #endif
     }
+    // file:// localStorage has no guaranteed persistent origin across launches.
+    // Keep only the pending campaign in a small atomic native file; all other
+    // storage keys retain their existing behavior. QA data never shares this file.
+    private var pendingURL: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent(isolatedScores ? "pending-campaign-qa.json" : "pending-campaign.json")
+    }
+
     private lazy var scoreSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 8
@@ -74,10 +82,50 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
             """
         }
         #endif
+        let savedPending = pendingURL.flatMap { try? Data(contentsOf: $0) }?.base64EncodedString() ?? ""
         let bridge = """
         (() => {
           // Exact endpoint only, routed through real loopback HTTP in simulator QA.
           const isolated = \(isolatedScores ? "true" : "false");
+          const pendingKey = 'dh_pending_campaign';
+          const store = window.localStorage;
+          const originalGet = Storage.prototype.getItem;
+          const originalSet = Storage.prototype.setItem;
+          const originalRemove = Storage.prototype.removeItem;
+          const saved = '\(savedPending)';
+          let pendingValue = null;
+          try {
+            pendingValue = saved
+              ? JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(saved), c => c.charCodeAt(0))))
+              : originalGet.call(store, pendingKey);
+          } catch (_) {}
+          let pendingWrites = Promise.resolve();
+          function savePending(value) {
+            pendingValue = value;
+            pendingWrites = pendingWrites.catch(() => {}).then(() =>
+              window.webkit.messageHandlers.pendingCampaign.postMessage({value}));
+            // Observe the rejection here, but retain it for the POST durability gate.
+            pendingWrites.catch(() => {});
+          }
+          Storage.prototype.getItem = function(key) {
+            return this === store && String(key) === pendingKey
+              ? pendingValue : originalGet.apply(this, arguments);
+          };
+          Storage.prototype.setItem = function(key, value) {
+            if (this === store && String(key) === pendingKey) {
+              savePending(String(value));
+              return;
+            }
+            return originalSet.apply(this, arguments);
+          };
+          Storage.prototype.removeItem = function(key) {
+            if (this === store && String(key) === pendingKey) {
+              savePending(null);
+              return;
+            }
+            return originalRemove.apply(this, arguments);
+          };
+          if (!saved && pendingValue !== null) savePending(pendingValue);
           if (isolated) { \(fixtureSeed) }
           const scoreEndpoint = 'https://dont-hit-scores.onrender.com/scores';
           const originalFetch = window.fetch.bind(window);
@@ -87,9 +135,11 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
               const method = options?.method || 'GET';
               if (method !== 'GET' && method !== 'POST') return Promise.reject(new TypeError('Unsupported score method'));
               if (options?.signal?.aborted) return Promise.reject(new DOMException('Aborted','AbortError'));
-              return window.webkit.messageHandlers.isolatedScore.postMessage({
-                method, body: options?.body || ''
-              }).then(reply => {
+              // A failed disk write must not submit a score that cannot be retried.
+              return (method === 'POST' ? pendingWrites : Promise.resolve()).then(() =>
+                window.webkit.messageHandlers.isolatedScore.postMessage({
+                  method, body: options?.body || ''
+                })).then(reply => {
                 if (options?.signal?.aborted) throw new DOMException('Aborted','AbortError');
                 return new Response(reply.body, {status:reply.status, headers:{'Content-Type':'application/json'}});
               });
@@ -117,6 +167,7 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
         """
         config.userContentController.addUserScript(WKUserScript(source: bridge, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.userContentController.add(self, name: "gameHaptic")
+        config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "pendingCampaign")
         if isolatedScores {
             config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "isolatedScore")
         }
@@ -159,6 +210,35 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
     func userContentController(_ userContentController: WKUserContentController,
                                didReceive message: WKScriptMessage,
                                replyHandler: @escaping (Any?, String?) -> Void) {
+        if message.name == "pendingCampaign" {
+            guard message.frameInfo.isMainFrame, message.frameInfo.request.url == gameURL,
+                  let payload = message.body as? [String: Any],
+                  let raw = payload["value"], let url = pendingURL else {
+                replyHandler(nil, "Pending campaign write not permitted")
+                return
+            }
+            let value: String?
+            if raw is NSNull {
+                value = nil
+            } else if let string = raw as? String, string.utf8.count <= 2048,
+                      let parsed = try? JSONSerialization.jsonObject(with: Data(string.utf8)),
+                      parsed is [String: Any] {
+                value = string
+            } else {
+                replyHandler(nil, "Invalid pending campaign")
+                return
+            }
+            do {
+                try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                        withIntermediateDirectories: true)
+                // Store JSON null as a tombstone to prevent resurrecting stale web storage.
+                try JSONEncoder().encode(value).write(to: url, options: .atomic)
+                replyHandler(true, nil)
+            } catch {
+                replyHandler(nil, "Pending campaign could not be saved")
+            }
+            return
+        }
         guard isolatedScores, message.name == "isolatedScore", message.frameInfo.isMainFrame,
               message.frameInfo.request.url == gameURL,
               let payload = message.body as? [String: Any],
