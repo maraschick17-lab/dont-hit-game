@@ -59,6 +59,30 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
             .appendingPathComponent(name)
     }
 
+    // Only existing local game keys; never includes score submission payloads.
+    private static let gameKeys: Set<String> = [
+        "dh_bank", "dh_best", "dh_owned", "dh_mute",
+        "rto_endless_records_v1", "rto_endless_unlocked_v1", "rto_campaign_records_v1"
+    ]
+    private var gameSaveURL: URL? {
+        var name = "game-save-v1.json"
+        #if DEBUG && targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("-retention-qa") { name = "game-save-retention-qa.json" }
+        #endif
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent(name)
+    }
+    private var gameValues: [String: String] = [:]
+
+    private func writeGameValues(_ values: [String: String]) throws {
+        guard let url = gameSaveURL else { throw CocoaError(.fileNoSuchFile) }
+        let data = try JSONEncoder().encode(values)
+        guard data.count <= 16384 else { throw CocoaError(.fileWriteOutOfSpace) }
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url, options: .atomic)
+        gameValues = values
+    }
+
     private lazy var scoreSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = isolatedScores ? 8 : 55
@@ -92,11 +116,40 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
             """
         }
         #endif
+        if let url = gameSaveURL, let data = try? Data(contentsOf: url), data.count <= 16384,
+           let values = try? JSONDecoder().decode([String: String].self, from: data) {
+            gameValues = values.filter { Self.gameKeys.contains($0.key) }
+        }
+        #if DEBUG && targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("-retention-qa") {
+            if ProcessInfo.processInfo.arguments.contains("-reset-retention-qa") {
+                try? writeGameValues([:])
+            } else if ProcessInfo.processInfo.arguments.contains("-seed-retention-unlock") {
+                // Local fixture only, no campaign submission or network access.
+                try? writeGameValues(["rto_endless_unlocked_v1": "true", "dh_mute": "false"])
+            }
+        }
+        #endif
+        let savedGame = (try? JSONEncoder().encode(gameValues))?.base64EncodedString() ?? ""
         let savedPending = pendingURL.flatMap { try? Data(contentsOf: $0) }?.base64EncodedString() ?? ""
         let bridge = """
         (() => {
           // Exact endpoint only; Swift independently enforces the destination and verb.
           const mode = '\(scoreMode.rawValue)';
+          const gameKeys = new Set(['dh_bank','dh_best','dh_owned','dh_mute','rto_endless_records_v1','rto_endless_unlocked_v1','rto_campaign_records_v1']);
+          let gameValues = {};
+          try {
+            const storedGame = '\(savedGame)';
+            if (storedGame) gameValues = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(storedGame), c => c.charCodeAt(0))));
+          } catch (_) {}
+          Object.defineProperty(window, 'rushNativeGameSave', {value: Object.freeze({
+            get: key => gameKeys.has(key) && Object.prototype.hasOwnProperty.call(gameValues,key) ? gameValues[key] : null,
+            set: (key,value) => {
+              if (!gameKeys.has(key) || typeof value !== 'string') return;
+              gameValues[key] = value;
+              window.webkit.messageHandlers.gameSave.postMessage({key,value}).catch(() => {});
+            }
+          })});
           const pendingKey = 'dh_pending_campaign';
           const saved = '\(savedPending)';
           let pendingValue = null;
@@ -162,6 +215,7 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
         config.userContentController.addUserScript(WKUserScript(source: bridge, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.userContentController.add(self, name: "gameHaptic")
         config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "pendingCampaign")
+        config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "gameSave")
         if scoreMode != .offline {
             config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "nativeScore")
         }
@@ -204,6 +258,25 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
     func userContentController(_ userContentController: WKUserContentController,
                                didReceive message: WKScriptMessage,
                                replyHandler: @escaping (Any?, String?) -> Void) {
+        if message.name == "gameSave" {
+            guard message.frameInfo.isMainFrame, message.frameInfo.request.url == gameURL,
+                  let payload = message.body as? [String: Any],
+                  let key = payload["key"] as? String, Self.gameKeys.contains(key),
+                  let value = payload["value"] as? String, value.utf8.count <= 4096,
+                  (try? JSONSerialization.jsonObject(with: Data(value.utf8), options: .fragmentsAllowed)) != nil else {
+                replyHandler(nil, "Invalid local game save")
+                return
+            }
+            var next = gameValues
+            next[key] = value
+            do {
+                try writeGameValues(next)
+                replyHandler(true, nil)
+            } catch {
+                replyHandler(nil, "Local game save failed")
+            }
+            return
+        }
         if message.name == "pendingCampaign" {
             guard message.frameInfo.isMainFrame, message.frameInfo.request.url == gameURL,
                   let payload = message.body as? [String: Any],

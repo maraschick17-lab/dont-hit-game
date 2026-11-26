@@ -86,3 +86,42 @@ final class ProductionScoreReadOnlySmoke: XCTestCase {
         app.terminate()
     }
 }
+
+final class RetentionSmoke: XCTestCase {
+    func testLocalUnlockAndSettingsPersistAcrossRelaunch() throws {
+        let app = XCUIApplication()
+        func open(_ args: [String]) {
+            app.launchArguments = ["-retention-qa"] + args
+            app.launch()
+            XCTAssertTrue(app.buttons["LET'S GO"].waitForExistence(timeout: 25))
+        }
+        let endless = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "ENDLESS ORBIT")).firstMatch
+        open(["-reset-retention-qa"])
+        XCTAssertFalse(endless.exists, "New local save must not skip the campaign")
+        app.terminate()
+        open(["-seed-retention-unlock"])
+        XCTAssertTrue(endless.waitForExistence(timeout: 5), "Fixture represents a previously earned unlock")
+        app.buttons["GARAGE"].tap()
+        let sound = app.buttons["SOUND: ON"]
+        XCTAssertTrue(sound.waitForExistence(timeout: 5))
+        sound.tap()
+        XCTAssertTrue(app.buttons["SOUND: OFF"].waitForExistence(timeout: 5))
+        // Allow the async WebKit bridge to deliver the atomic disk write.
+        Thread.sleep(forTimeInterval: 1)
+        app.terminate()
+        open([])
+        XCTAssertTrue(endless.waitForExistence(timeout: 5), "Unlock must survive app relaunch")
+        app.buttons["GARAGE"].tap()
+        XCTAssertTrue(app.buttons["SOUND: OFF"].waitForExistence(timeout: 5), "Real UI setting must survive relaunch")
+        app.buttons["BACK TO GAME"].tap()
+        XCTAssertTrue(endless.waitForExistence(timeout: 5))
+        endless.tap()
+        let hud = app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "ORBIT")).firstMatch
+        XCTAssertTrue(hud.waitForExistence(timeout: 5), "Actual native Endless mode did not start")
+        let capture = XCTAttachment(screenshot: app.screenshot())
+        capture.name = "Native Endless Orbit (QA fixture unlock)"
+        capture.lifetime = .keepAlways
+        add(capture)
+        app.terminate()
+    }
+}

@@ -5,8 +5,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "4.13"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "4.14"
+    CURRENT_PROJECT_VERSION: "2"
 targets:
   RushToOrbit:
     type: application

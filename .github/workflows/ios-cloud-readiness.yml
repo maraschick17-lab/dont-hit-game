@@ -12,21 +12,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: c22c1d22c8ed1f1df288a6f6e5e1ea6b99963157
-      - name: Match deployed v4.13 public assets against release commit
+          ref: 2e42f9049fc15c711ddafe1004651dc913de5dbf
+      - name: Match deployed v4.14 public assets against release commit
         shell: bash
         run: |
           set -euo pipefail
           for asset in index.html leaderboard.js manifest.webmanifest icon.svg; do
             path="$asset"
             if [[ "$asset" == index.html ]]; then path=""; fi
-            curl --fail --silent --show-error --location --retry 3 --max-time 30 "https://dont-hit-game.onrender.com/${path}?release=c22c1d22c8ed1f1df288a6f6e5e1ea6b99963157" -o "/tmp/live-$asset"
+            curl --fail --silent --show-error --location --retry 3 --max-time 30 "https://dont-hit-game.onrender.com/${path}?release=2e42f9049fc15c711ddafe1004651dc913de5dbf" -o "/tmp/live-$asset"
             cmp "$asset" "/tmp/live-$asset"
             sha256sum "/tmp/live-$asset"
           done
-          grep -Fq 'v4.13' /tmp/live-index.html
+          grep -Fq 'v4.14' /tmp/live-index.html
           grep -Fq '<title>RUSH TO ORBIT</title>' /tmp/live-index.html
-          echo 'Production v4.13 matches all four release assets; GET only.'
+          echo 'Production v4.14 matches all four release assets; GET only.'
   ios-toolchain:
     runs-on: xcode-27
     timeout-minutes: 15
@@ -69,6 +69,17 @@ jobs:
         run: |
           set -euo pipefail
           xcodebuild -project ios/RushToOrbit.xcodeproj -scheme RushToOrbit -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath ios/DeviceDerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+      - name: Preserve unsigned physical-device binary for inspection
+        shell: bash
+        run: |
+          set -euo pipefail
+          ditto -c -k --keepParent ios/DeviceDerivedData/Build/Products/Release-iphoneos/RushToOrbit.app /tmp/rush-to-orbit-unsigned-device.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rush-to-orbit-unsigned-device
+          path: /tmp/rush-to-orbit-unsigned-device.zip
+          retention-days: 3
+          if-no-files-found: error
       - name: Checkout exact deployed score validator for isolated tests
         uses: actions/checkout@v4
         with:
