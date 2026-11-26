@@ -21,17 +21,18 @@ const {buildQA,createServer}=require('../qa-server.cjs');
    page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(!r.url().startsWith(url+'/'))external.push(r.url())});
    await context.route('**/*',route=>route.request().url().startsWith(url+'/')?route.continue():route.abort());
    await page.goto(url);
+   async function until(fn,label){for(let n=0;n<100;n++){if(await fn())return;await new Promise(r=>setTimeout(r,50))}throw Error('Missing '+label)}
    async function reset(){await page.locator('#qaHome').tap();await page.locator('#qaList').waitFor({state:'visible'});}
    for(const [i,label] of ['ROAD','SEA','AIR','SPACE'].entries()){
-    await page.locator('[data-qa-stage="'+i+'"]').tap();await page.waitForFunction(l=>document.querySelector('#score').textContent.startsWith(l),label);
+    await page.locator('[data-qa-stage="'+i+'"]').tap();await until(async()=> (await page.locator('#score').textContent()).startsWith(label),label);
     assert.equal(await page.locator('#panel').isVisible(),false);await reset();
    }
-   await page.locator('#qaVictory').tap();await page.getByText('ORBIT ACHIEVED — YOU WIN!').waitFor();await page.locator('#endless').tap();await page.waitForFunction(()=>document.querySelector('#score').textContent.startsWith('ORBIT'));await reset();
-   await page.locator('#qaEndless').tap();await page.waitForFunction(()=>document.querySelector('#score').textContent.startsWith('ORBIT'));await reset();
+   await page.locator('#qaVictory').tap();await page.getByText('ORBIT ACHIEVED — YOU WIN!').waitFor();await page.locator('#endless').tap();await until(async()=> (await page.locator('#score').textContent()).startsWith('ORBIT'),'ORBIT');await reset();
+   await page.locator('#qaEndless').tap();await until(async()=> (await page.locator('#score').textContent()).startsWith('ORBIT'),'ORBIT');await reset();
    const opts=await page.locator('#qaDestination option').evaluateAll(a=>a.map(x=>[x.value,x.textContent]));
    for(const [value,label] of opts){
     await page.locator('#qaDestination').selectOption(value);await page.locator('#qaJump').tap();
-    await page.waitForFunction(l=>window.qaCanvasLabels.includes(l),label,{timeout:4000});
+    await until(()=>page.evaluate(l=>window.qaCanvasLabels.includes(l),label),label);
     await reset();
    }
    assert.deepEqual(errors,[]);assert.deepEqual(external,[]);assert.equal(await page.evaluate(()=>localStorage.length),0);
