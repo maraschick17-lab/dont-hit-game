@@ -1,0 +1,20 @@
+name: Validate Endless Orbit candidate
+on:
+  push:
+    branches: [engineering/v4.14-endless-orbit]
+permissions:
+  contents: read
+jobs:
+  mobile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test test.cjs tests/moving-traffic.cjs
+      - run: npm install --no-save --no-package-lock playwright@1.51.1
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/endless-orbit-smoke.cjs
+      - run: node tests/sequential-mobile-smoke.cjs
