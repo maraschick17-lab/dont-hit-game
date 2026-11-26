@@ -64,14 +64,45 @@ jobs:
         run: |
           set -euo pipefail
           xcodebuild -project ios/RushToOrbit.xcodeproj -scheme RushToOrbit -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath ios/DerivedData CODE_SIGNING_ALLOWED=NO build
-      - name: Run offline native UI smoke
+      - name: Checkout exact deployed score validator for isolated tests
+        uses: actions/checkout@v4
+        with:
+          ref: 6436df3282bf0652957fe24de27a136ccc5841b3
+          path: ios/qa/score-backend
+          persist-credentials: false
+      - name: Start isolated real HTTP score service
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ios/qa/score-backend/scores
+          if [[ -f package-lock.json ]]; then npm ci --ignore-scripts; else npm install --ignore-scripts --no-audit --no-fund; fi
+          cd ../../..
+          node qa/isolated-score-server.mjs > /tmp/rush-isolated-scores.log 2>&1 &
+          for i in {1..20}; do
+            if curl --fail --silent http://127.0.0.1:18081/scores | grep -Fxq '[]'; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/rush-isolated-scores.log
+          exit 1
+      - name: Run offline and isolated HTTP native UI smoke
         shell: bash
         run: |
           set -euo pipefail
           device="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for k,v in d.items() if "iOS-" in k for x in v if x["name"]=="iPhone 18 Pro" and x["isAvailable"]))')"
           xcrun simctl boot "$device" || true
           xcrun simctl bootstatus "$device" -b
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" ios/App/Info.plist
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" ios/App/Info.plist
           xcodebuild -project ios/RushToOrbit.xcodeproj -scheme RushToOrbit -configuration Debug -destination "platform=iOS Simulator,id=$device" -derivedDataPath ios/DerivedData -resultBundlePath ios/NativeSmoke.xcresult CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO test
+      - name: Assert isolated HTTP backend saw only expected writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat /tmp/rush-isolated-scores.log
+          grep -Fxq 'INSERT QA first' /tmp/rush-isolated-scores.log
+          grep -Fxq 'RETRY QA identical' /tmp/rush-isolated-scores.log
+          test "$(grep -c '^INSERT ' /tmp/rush-isolated-scores.log)" = 1
+          curl --fail --silent http://127.0.0.1:18081/scores | python3 -c 'import json,sys; assert json.load(sys.stdin)==[{"initials":"QA","points":6000,"milliseconds":120000}]'
       - name: Preserve unsigned simulator application
         if: always()
         uses: actions/upload-artifact@v4

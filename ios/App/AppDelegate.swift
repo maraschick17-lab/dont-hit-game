@@ -27,10 +27,28 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
 // Internal simulator candidate only. Never connects to production scores.
 // The eventual production bridge must use a narrowly approved origin and validated requests.
-final class GameController: UIViewController, WKNavigationDelegate, WKScriptMessageHandler {
+final class GameController: UIViewController, WKNavigationDelegate, WKScriptMessageHandler, WKScriptMessageHandlerWithReply, URLSessionTaskDelegate {
     private var web: WKWebView!
     private var gameURL: URL?
     private let impact = UIImpactFeedbackGenerator(style: .medium)
+
+    // The fixture is available only in debug simulator launches with an explicit flag.
+    // Production hosts are never reachable from this candidate.
+    private var isolatedScores: Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        return ProcessInfo.processInfo.arguments.contains("-isolated-scores")
+        #else
+        return false
+        #endif
+    }
+    private lazy var scoreSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 8
+        config.timeoutIntervalForResource = 12
+        config.httpShouldSetCookies = false
+        config.urlCache = nil
+        return URLSession(configuration: config, delegate: self, delegateQueue: nil)
+    }()
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -38,12 +56,44 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
         config.allowsInlineMediaPlayback = true
+        var fixtureSeed = ""
+        #if DEBUG && targetEnvironment(simulator)
+        if isolatedScores && ProcessInfo.processInfo.arguments.contains("-seed-isolated-valid") {
+            fixtureSeed = """
+            localStorage.setItem('dh_pending_campaign', JSON.stringify({
+              id:'00000000-0000-4000-8000-000000000001', initials:'QA',
+              stages:[0,1,2,3].map(stage => ({stage,score:1500,ms:30000}))
+            }));
+            """
+        } else if isolatedScores && ProcessInfo.processInfo.arguments.contains("-seed-isolated-invalid") {
+            fixtureSeed = """
+            localStorage.setItem('dh_pending_campaign', JSON.stringify({
+              id:'00000000-0000-4000-8000-000000000002', initials:'QA',
+              stages:[0,1,2,3].map(stage => ({stage,score:50000,ms:30000}))
+            }));
+            """
+        }
+        #endif
         let bridge = """
         (() => {
-          // Offline QA only: no fake leaderboard results and no production traffic.
+          // Exact endpoint only, routed through real loopback HTTP in simulator QA.
+          const isolated = \(isolatedScores ? "true" : "false");
+          if (isolated) { \(fixtureSeed) }
+          const scoreEndpoint = 'https://dont-hit-scores.onrender.com/scores';
           const originalFetch = window.fetch.bind(window);
           window.fetch = (input, options) => {
             const value = typeof input === 'string' ? input : input.url;
+            if (isolated && value === scoreEndpoint) {
+              const method = options?.method || 'GET';
+              if (method !== 'GET' && method !== 'POST') return Promise.reject(new TypeError('Unsupported score method'));
+              if (options?.signal?.aborted) return Promise.reject(new DOMException('Aborted','AbortError'));
+              return window.webkit.messageHandlers.isolatedScore.postMessage({
+                method, body: options?.body || ''
+              }).then(reply => {
+                if (options?.signal?.aborted) throw new DOMException('Aborted','AbortError');
+                return new Response(reply.body, {status:reply.status, headers:{'Content-Type':'application/json'}});
+              });
+            }
             if (/^https?:/i.test(String(value))) {
               return Promise.reject(new TypeError('Offline native test build'));
             }
@@ -67,6 +117,9 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
         """
         config.userContentController.addUserScript(WKUserScript(source: bridge, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.userContentController.add(self, name: "gameHaptic")
+        if isolatedScores {
+            config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "isolatedScore")
+        }
         web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = self
         web.scrollView.isScrollEnabled = false
@@ -101,6 +154,46 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
                 self.web.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
             }
         }
+    }
+
+    func userContentController(_ userContentController: WKUserContentController,
+                               didReceive message: WKScriptMessage,
+                               replyHandler: @escaping (Any?, String?) -> Void) {
+        guard isolatedScores, message.name == "isolatedScore", message.frameInfo.isMainFrame,
+              message.frameInfo.request.url == gameURL,
+              let payload = message.body as? [String: Any],
+              let method = payload["method"] as? String,
+              let body = payload["body"] as? String,
+              (method == "GET" && body.isEmpty || method == "POST" && body.utf8.count <= 2048),
+              let endpoint = URL(string: "http://127.0.0.1:18081/scores") else {
+            replyHandler(nil, "Score request not permitted")
+            return
+        }
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = method
+        if method == "POST" {
+            request.httpBody = Data(body.utf8)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        scoreSession.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                guard error == nil, let response = response as? HTTPURLResponse,
+                      response.url == endpoint, let data = data, data.count <= 65536,
+                      let body = String(data: data, encoding: .utf8),
+                      [200, 400, 409, 413, 415, 503].contains(response.statusCode) else {
+                    replyHandler(nil, "Isolated score service unavailable")
+                    return
+                }
+                replyHandler(["status": response.statusCode, "body": body], nil)
+            }
+        }.resume()
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
     }
 
     private func showError(_ message: String) {
