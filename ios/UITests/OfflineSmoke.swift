@@ -201,9 +201,18 @@ final class NativeCampaignSmoke: XCTestCase {
                 app.terminate()
                 app.launchArguments = ["-retention-qa"]
                 app.launch()
+                XCTAssertTrue(play.waitForExistence(timeout: 25), "Relaunched game menu must be ready")
                 XCTAssertTrue(endless.waitForExistence(timeout: 25), "Earned unlock persists after relaunch")
+                XCTAssertTrue(endless.isHittable, "Earned Endless button must be directly accessible on the home menu")
                 endless.tap()
-                XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "ORBIT")).firstMatch.waitForExistence(timeout: 5))
+                let orbitHUD = app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "ORBIT ·")).firstMatch
+                let entered = orbitHUD.waitForExistence(timeout: 10)
+                if !entered {
+                    capture("Native earned Endless entry failure")
+                    print("Endless entry failure, UI tree: \(app.debugDescription)")
+                }
+                XCTAssertTrue(entered, "Earned Endless must actually start after relaunch")
+                XCTAssertFalse(endless.exists, "Home menu must leave the screen when Endless starts")
                 capture("Native earned Endless Orbit")
                 app.terminate()
                 return
