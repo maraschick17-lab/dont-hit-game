@@ -64,11 +64,15 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
         "dh_bank", "dh_best", "dh_owned", "dh_mute",
         "rto_endless_records_v1", "rto_endless_unlocked_v1", "rto_campaign_records_v1"
     ]
-    private var gameSaveURL: URL? {
-        var name = "game-save-v1.json"
+    private var retentionQA: Bool {
         #if DEBUG && targetEnvironment(simulator)
-        if ProcessInfo.processInfo.arguments.contains("-retention-qa") { name = "game-save-retention-qa.json" }
+        return ProcessInfo.processInfo.arguments.contains("-retention-qa")
+        #else
+        return false
         #endif
+    }
+    private var gameSaveURL: URL? {
+        let name = retentionQA ? "game-save-retention-qa.json" : "game-save-v1.json"
         return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent(name)
     }
@@ -96,7 +100,9 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
         super.viewDidLoad()
         view.backgroundColor = UIColor(red: 16/255, green: 20/255, blue: 33/255, alpha: 1)
         let config = WKWebViewConfiguration()
-        config.websiteDataStore = .default()
+        // The fixture must never read or write legacy persistent WebKit saves.
+        // A new ephemeral store per launch also proves native file persistence.
+        config.websiteDataStore = retentionQA ? .nonPersistent() : .default()
         config.allowsInlineMediaPlayback = true
         var fixtureSeed = ""
         #if DEBUG && targetEnvironment(simulator)
@@ -121,7 +127,7 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
             gameValues = values.filter { Self.gameKeys.contains($0.key) }
         }
         #if DEBUG && targetEnvironment(simulator)
-        if ProcessInfo.processInfo.arguments.contains("-retention-qa") {
+        if retentionQA {
             if ProcessInfo.processInfo.arguments.contains("-reset-retention-qa") {
                 try? writeGameValues([:])
             } else if ProcessInfo.processInfo.arguments.contains("-seed-retention-unlock") {
@@ -333,11 +339,11 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
         scoreSession.dataTask(with: request) { data, response, error in
             DispatchQueue.main.async {
                 #if DEBUG && targetEnvironment(simulator)
-                if self.isolatedScores {
+                if self.isolatedScores || self.scoreMode == .liveReadOnly {
                     // No payload, initials, or credentials in diagnostics.
                     let code = (error as NSError?)?.code ?? 0
                     let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                    print("Isolated score transport: method=\(method) status=\(status) error=\(code)")
+                    print("Native QA score transport: mode=\(self.scoreMode.rawValue) method=\(method) status=\(status) error=\(code)")
                 }
                 #endif
                 guard error == nil, let response = response as? HTTPURLResponse,
