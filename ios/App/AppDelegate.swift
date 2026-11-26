@@ -25,34 +25,44 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 }
 
-// Internal simulator candidate only. Never connects to production scores.
-// The eventual production bridge must use a narrowly approved origin and validated requests.
+// Bundle-only WebKit navigation; the native score bridge is the sole network route.
 final class GameController: UIViewController, WKNavigationDelegate, WKScriptMessageHandler, WKScriptMessageHandlerWithReply, URLSessionTaskDelegate {
     private var web: WKWebView!
     private var gameURL: URL?
     private let impact = UIImpactFeedbackGenerator(style: .medium)
 
-    // The fixture is available only in debug simulator launches with an explicit flag.
-    // Production hosts are never reachable from this candidate.
-    private var isolatedScores: Bool {
+    private enum ScoreMode: String { case offline, isolated, liveReadOnly, live }
+
+    // Debug fixtures and live read-only QA cannot write production scores.
+    // Only a release build on a physical device enables production POST.
+    private var scoreMode: ScoreMode {
         #if DEBUG && targetEnvironment(simulator)
-        return ProcessInfo.processInfo.arguments.contains("-isolated-scores")
-        #else
-        return false
+        if ProcessInfo.processInfo.arguments.contains("-isolated-scores") { return .isolated }
+        if ProcessInfo.processInfo.arguments.contains("-production-score-read-only") { return .liveReadOnly }
+        #elseif !DEBUG && !targetEnvironment(simulator)
+        return .live
         #endif
+        return .offline
     }
+    private var isolatedScores: Bool { scoreMode == .isolated }
     // file:// localStorage has no guaranteed persistent origin across launches.
     // Keep only the pending campaign in a small atomic native file; all other
     // storage keys retain their existing behavior. QA data never shares this file.
     private var pendingURL: URL? {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-            .appendingPathComponent(isolatedScores ? "pending-campaign-qa.json" : "pending-campaign.json")
+        let name: String
+        switch scoreMode {
+        case .isolated: name = "pending-campaign-qa.json"
+        case .liveReadOnly: name = "pending-campaign-readonly-qa.json"
+        case .offline, .live: name = "pending-campaign.json"
+        }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent(name)
     }
 
     private lazy var scoreSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 8
-        config.timeoutIntervalForResource = 12
+        config.timeoutIntervalForRequest = isolatedScores ? 8 : 55
+        config.timeoutIntervalForResource = isolatedScores ? 12 : 60
         config.httpShouldSetCookies = false
         config.urlCache = nil
         return URLSession(configuration: config, delegate: self, delegateQueue: nil)
@@ -85,8 +95,8 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
         let savedPending = pendingURL.flatMap { try? Data(contentsOf: $0) }?.base64EncodedString() ?? ""
         let bridge = """
         (() => {
-          // Exact endpoint only, routed through real loopback HTTP in simulator QA.
-          const isolated = \(isolatedScores ? "true" : "false");
+          // Exact endpoint only; Swift independently enforces the destination and verb.
+          const mode = '\(scoreMode.rawValue)';
           const pendingKey = 'dh_pending_campaign';
           const store = window.localStorage;
           const originalGet = Storage.prototype.getItem;
@@ -97,7 +107,7 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
           try {
             pendingValue = saved
               ? JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(saved), c => c.charCodeAt(0))))
-              : originalGet.call(store, pendingKey);
+              : (mode === 'liveReadOnly' ? null : originalGet.call(store, pendingKey));
           } catch (_) {}
           let pendingWrites = Promise.resolve();
           function savePending(value) {
@@ -126,18 +136,18 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
             return originalRemove.apply(this, arguments);
           };
           if (!saved && pendingValue !== null) savePending(pendingValue);
-          if (isolated) { \(fixtureSeed) }
+          if (mode === 'isolated') { \(fixtureSeed) }
           const scoreEndpoint = 'https://dont-hit-scores.onrender.com/scores';
           const originalFetch = window.fetch.bind(window);
           window.fetch = (input, options) => {
             const value = typeof input === 'string' ? input : input.url;
-            if (isolated && value === scoreEndpoint) {
+            if (mode !== 'offline' && value === scoreEndpoint) {
               const method = options?.method || 'GET';
-              if (method !== 'GET' && method !== 'POST') return Promise.reject(new TypeError('Unsupported score method'));
+              if (method !== 'GET' && (method !== 'POST' || mode === 'liveReadOnly')) return Promise.reject(new TypeError('Unsupported score method'));
               if (options?.signal?.aborted) return Promise.reject(new DOMException('Aborted','AbortError'));
               // A failed disk write must not submit a score that cannot be retried.
               return (method === 'POST' ? pendingWrites : Promise.resolve()).then(() =>
-                window.webkit.messageHandlers.isolatedScore.postMessage({
+                window.webkit.messageHandlers.nativeScore.postMessage({
                   method, body: options?.body || ''
                 })).then(reply => {
                 if (options?.signal?.aborted) throw new DOMException('Aborted','AbortError');
@@ -168,8 +178,8 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
         config.userContentController.addUserScript(WKUserScript(source: bridge, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.userContentController.add(self, name: "gameHaptic")
         config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "pendingCampaign")
-        if isolatedScores {
-            config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "isolatedScore")
+        if scoreMode != .offline {
+            config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "nativeScore")
         }
         web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = self
@@ -239,19 +249,27 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
             }
             return
         }
-        guard isolatedScores, message.name == "isolatedScore", message.frameInfo.isMainFrame,
+        guard scoreMode != .offline, message.name == "nativeScore", message.frameInfo.isMainFrame,
               message.frameInfo.request.url == gameURL,
               let payload = message.body as? [String: Any],
               let method = payload["method"] as? String,
               let body = payload["body"] as? String,
-              (method == "GET" && body.isEmpty || method == "POST" && body.utf8.count <= 2048),
-              let endpoint = URL(string: "http://127.0.0.1:18081/scores") else {
+              (method == "GET" && body.isEmpty ||
+               method == "POST" && scoreMode != .liveReadOnly && body.utf8.count <= 2048),
+              let endpoint = URL(string: isolatedScores ? "http://127.0.0.1:18081/scores" :
+                                 "https://dont-hit-scores.onrender.com/scores") else {
             replyHandler(nil, "Score request not permitted")
             return
         }
         var request = URLRequest(url: endpoint)
         request.httpMethod = method
         if method == "POST" {
+            // Enforce durability on the native side, not just in the JavaScript adapter.
+            guard let url = pendingURL, let data = try? Data(contentsOf: url),
+                  let saved = try? JSONDecoder().decode(String.self, from: data), saved == body else {
+                replyHandler(nil, "Score not saved for retry")
+                return
+            }
             request.httpBody = Data(body.utf8)
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
@@ -261,7 +279,7 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
                       response.url == endpoint, let data = data, data.count <= 65536,
                       let body = String(data: data, encoding: .utf8),
                       [200, 400, 409, 413, 415, 503].contains(response.statusCode) else {
-                    replyHandler(nil, "Isolated score service unavailable")
+                    replyHandler(nil, "Score service unavailable")
                     return
                 }
                 replyHandler(["status": response.statusCode, "body": body], nil)

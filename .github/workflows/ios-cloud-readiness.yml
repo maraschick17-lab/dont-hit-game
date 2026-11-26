@@ -64,6 +64,11 @@ jobs:
         run: |
           set -euo pipefail
           xcodebuild -project ios/RushToOrbit.xcodeproj -scheme RushToOrbit -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath ios/DerivedData CODE_SIGNING_ALLOWED=NO build
+      - name: Compile unsigned device Release configuration (not distribution signed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -project ios/RushToOrbit.xcodeproj -scheme RushToOrbit -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath ios/DeviceDerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
       - name: Checkout exact deployed score validator for isolated tests
         uses: actions/checkout@v4
         with:
@@ -84,7 +89,7 @@ jobs:
           done
           cat /tmp/rush-isolated-scores.log
           exit 1
-      - name: Run offline and isolated HTTP native UI smoke
+      - name: Run offline, isolated HTTP and production read-only native UI smoke
         shell: bash
         run: |
           set -euo pipefail

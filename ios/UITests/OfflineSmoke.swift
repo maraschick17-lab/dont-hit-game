@@ -69,3 +69,20 @@ final class IsolatedScoreSmoke: XCTestCase {
         app.terminate()
     }
 }
+
+final class ProductionScoreReadOnlySmoke: XCTestCase {
+    func testActualNativeHTTPSLeaderboardReadWithoutPosting() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-production-score-read-only"]
+        app.launch()
+        let board = app.buttons["GLOBAL LEADERBOARD"]
+        XCTAssertTrue(board.waitForExistence(timeout: 25))
+        board.tap()
+        let available = app.staticTexts.containing(NSPredicate(
+            format: "label == %@ OR label == %@", "Top campaign finishes", "First place is open."
+        )).firstMatch
+        XCTAssertTrue(available.waitForExistence(timeout: 70), "Native production HTTPS GET failed")
+        XCTAssertFalse(app.buttons["POST MY FINISH"].exists)
+        app.terminate()
+    }
+}
