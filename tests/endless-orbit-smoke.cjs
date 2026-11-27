@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),{chromium,devices}=require('playwright');
 const html=fs.readFileSync('index.html','utf8');
-const injection="window.__orbitQA={complete:()=>{stageProgress=30},state:()=>({running,stage,unlocked:orbitUnlocked(),endless:endless&&{...endless,fuel},playerPos,targetPos,records:orbitRecords()}),advance:()=>{endless.distance=16;orbitStep(.02)},hit:()=>{endless.rocks=[{lane:playerPos,y:H*playerY-100,oldY:H*playerY-100,hp:1,max:1,angle:0}];endless.shots=[{x:playerPos,y:H*playerY-75}];orbitStep(.04)},drain:()=>{fuel=0}};draw()})();";
+const injection="window.__orbitQA={complete:()=>{stageProgress=30},state:()=>({running,stage,unlocked:orbitUnlocked(),endless:endless&&{...endless,fuel},playerPos,targetPos,records:orbitRecords(),livery:orbitLivery().id}),advance:()=>{endless.distance=16;orbitStep(.02)},hit:()=>{endless.rocks=[{lane:playerPos,y:H*playerY-100,oldY:H*playerY-100,hp:1,max:1,angle:0}];endless.shots=[{x:playerPos,y:H*playerY-75}];orbitStep(.04)},drain:()=>{fuel=0}};draw()})();";
 (async()=>{const browser=await chromium.launch({headless:true,args:['--autoplay-policy=no-user-gesture-required']});
 try{for(const device of ['iPhone 13','iPhone SE']){
  const context=await browser.newContext({...devices[device],defaultBrowserType:'chromium',reducedMotion:'reduce'}),page=await context.newPage(),errors=[];
@@ -14,6 +14,15 @@ try{for(const device of ['iPhone 13','iPhone SE']){
  await page.evaluate(()=>window.__orbitQA.advance());await page.waitForFunction(()=>window.__orbitQA.state().endless.region===1);
  let state=await page.evaluate(()=>window.__orbitQA.state());assert.equal(state.endless.label,'THE MOON');assert(state.records.destination>=1);assert(state.endless.fuel<100);
  await page.evaluate(()=>window.__orbitQA.drain());await page.locator('#endless').waitFor({state:'visible'});assert.match(await page.locator('#box h1').innerText(),/OUT OF FUEL/);assert.match(await page.locator('#box').innerText(),/Next destination:/);
- assert.equal(await page.evaluate(()=>window.__campaignPosts),1);await page.reload();assert.equal(await page.locator('#endless').count(),1);
+ assert.equal(await page.evaluate(()=>window.__campaignPosts),1);
+ await page.locator('#orbitGarage').click();
+ assert(await page.locator('[data-livery="mars"]').isDisabled());
+ assert.equal(await page.locator('[data-livery="lunar"]').isDisabled(),false);
+ await page.locator('[data-livery="lunar"]').click();
+ assert.equal(await page.evaluate(()=>window.__orbitQA.state().livery),'lunar');
+ assert.equal(await page.locator('[data-livery="lunar"]').getAttribute('aria-pressed'),'true');
+ await page.locator('#endless').click();await page.waitForFunction(()=>window.__orbitQA.state().running);
+ await page.evaluate(()=>window.__orbitQA.drain());await page.locator('#orbitGarage').waitFor({state:'visible'});
+ await page.reload();assert.equal(await page.evaluate(()=>window.__orbitQA.state().livery),'lunar');assert.equal(await page.locator('#endless').count(),1);
  assert((await page.evaluate(()=>window.__orbitQA.state())).records.destroyed>=1);assert.deepEqual(errors,[]);console.log(device+': unlock, cannon, asteroid hit, milestone, depletion, records and reload passed');await context.close();
 }}finally{await browser.close()}})().catch(e=>{console.error(e);process.exitCode=1});
