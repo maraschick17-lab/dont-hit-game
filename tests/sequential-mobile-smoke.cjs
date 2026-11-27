@@ -15,7 +15,7 @@ assert(!/selectedStage|worldsMenu|data-world|UNLOCK WORLDS/.test(candidate));
    const context=await browser.newContext({...devices[device],defaultBrowserType:'chromium'});
    const page=await context.newPage();
    page.on('pageerror',e=>errors.push(String(e)));
-   await page.route('**/*',async route=>{
+   await page.route('**/*',async route=>{if(new URL(route.request().url()).pathname==='/reachability.txt')return route.fulfill({contentType:'text/plain',body:'rush-to-orbit-online-v1\n'});
     const url=route.request().url();
     if(url==='http://127.0.0.1:4173/'){return route.fulfill({contentType:'text/html',body:candidate.replace('draw()})();',injection)})}
     if(url==='http://127.0.0.1:4173/leaderboard.js'){return route.fulfill({contentType:'application/javascript',body:"window.rememberCampaign=c=>{window.__qaFinish=c};"})}
@@ -90,7 +90,7 @@ assert(!/selectedStage|worldsMenu|data-world|UNLOCK WORLDS/.test(candidate));
   const page=await context.newPage(),errors=[];
   page.on('pageerror',e=>errors.push(String(e)));
   const observer="window.__observe=()=>({stage,running,stageProgress,fuel,elapsed,speed,playerPos,targetPos,playerY,W,H,laneW,objects:objects.map(o=>({lane:o.lane,y:o.y,type:o.type,closing:trafficClosingFactor(o),dest:o.dest})),campaign:campaign.map(s=>({...s}))});draw()})();";
-  await page.route('**/*',async route=>{
+  await page.route('**/*',async route=>{if(new URL(route.request().url()).pathname==='/reachability.txt')return route.fulfill({contentType:'text/plain',body:'rush-to-orbit-online-v1\n'});
    const url=route.request().url();
    if(url==='http://127.0.0.1:4173/')return route.fulfill({contentType:'text/html',body:candidate.replace('draw()})();',observer)});
    if(url==='http://127.0.0.1:4173/leaderboard.js')return route.fulfill({contentType:'application/javascript',body:"window.rememberCampaign=c=>{window.__observedFinish=c.map(s=>({...s}))};"});

@@ -8,7 +8,7 @@ function makeSimulation(html){
  let v=seed,Math=Object.create(globalThis.Math);Math.random=()=>((v=(Math.imul(v,1664525)+1013904223)>>>0)/4294967296);
  ${destinations}${label}
  let endless=null,running=false,stage=0,campaign=[],pid=null,tx=null,playerLane=1,playerPos=1,targetPos=1,playerY=.78,targetY=.78,combo=0,roadOffset=0,speed=340,fuel=100,elapsed=0,audio=null,last=0;
- const panel={style:{}},controls={style:{}},performance={now:()=>0};function orbitUnlocked(){return true}function rememberOrbit(){}function orbitSound(){}function sound(){}function laneX(x){return x}function requestAnimationFrame(){}function engineStart(){}function orbitLoop(){}
+ const panel={style:{}},controls={style:{}},performance={now:()=>0};function orbitUnlocked(){return true}function gateStart(action){action()}function rememberOrbit(){}function orbitSound(){}function sound(){}function laneX(x){return x}function requestAnimationFrame(){}function engineStart(){}function orbitLoop(){}
  ${code}
  startEndless();playerPos=targetPos=lane;pid=turbo?1:null;
  let reason='',steps=0,collected=0,prior=100,heavy=false,light=false,route=[],seen=new Set();
