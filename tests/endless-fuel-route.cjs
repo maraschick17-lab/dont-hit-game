@@ -4,13 +4,13 @@ function makeSimulation(html){
  const destinations=html.slice(html.indexOf('const ORBIT_DESTINATIONS'),html.indexOf('let endless=null;'));
  const label=html.slice(html.indexOf('function orbitDestination'),html.indexOf('function rememberOrbit'));
  const code=html.slice(html.indexOf('function startEndless(){'),html.indexOf('function orbitPlanet'));
- return new Function('seed','mode','lane','H','turbo','limit',`
+ return new Function('seed','mode','lane','H','turbo','limit','startDistance=0',`
  let v=seed,Math=Object.create(globalThis.Math);Math.random=()=>((v=(Math.imul(v,1664525)+1013904223)>>>0)/4294967296);
  ${destinations}${label}
  let endless=null,running=false,stage=0,campaign=[],pid=null,tx=null,playerLane=1,playerPos=1,targetPos=1,playerY=.78,targetY=.78,combo=0,roadOffset=0,speed=340,fuel=100,elapsed=0,audio=null,last=0;
  const panel={style:{}},controls={style:{}},performance={now:()=>0};function orbitUnlocked(){return true}function gateStart(action){action()}function rememberOrbit(){}function orbitSound(){}function sound(){}function laneX(x){return x}function requestAnimationFrame(){}function engineStart(){}function orbitLoop(){}
  ${code}
- startEndless();playerPos=targetPos=lane;pid=turbo?1:null;
+ startEndless();playerPos=targetPos=lane;pid=turbo?1:null;endless.distance=startDistance;endless.region=orbitDestination(startDistance);endless.label=orbitLabel(endless.region,startDistance);
  let reason='',steps=0,collected=0,prior=100,heavy=false,light=false,route=[],seen=new Set();
  while(!reason&&steps++<60*limit){
   let e=endless;
@@ -24,6 +24,21 @@ function makeSimulation(html){
  return {time:Math.round(endless.time),distance:Math.round(endless.distance),reason:reason||'cap',collected,fuel:Math.round(fuel),destroyed:endless.destroyed,heavy,light,route};`);
 }
 const run=makeSimulation(html);
+test('Each destination has bounded wave parameters and only chooses available lanes',()=>{
+ const defs=html.slice(html.indexOf('const ORBIT_DESTINATIONS'),html.indexOf('let endless=null;'));
+ const laneFn=html.slice(html.indexOf('function orbitWaveLane'),html.indexOf('function orbitStep'));
+ const {destinations,waves,choose}=new Function(defs+laneFn+';return {destinations:ORBIT_DESTINATIONS,waves:ORBIT_WAVES,choose:orbitWaveLane}')();
+ assert.equal(waves.length,destinations.length);assert.equal(new Set(waves.map(w=>w.name)).size,waves.length);
+ for(const w of waves){assert(w.rate>=.9&&w.rate<=1.1);assert(Math.abs(w.armor)<=.15);for(const choices of [[],[0],[1],[2],[0,2],[0,1],[1,2]])for(let i=0;i<12;i++){
+  const lane=choose(choices,w.pattern,i,.41);assert(choices.length?choices.includes(lane):lane===null);
+ }}
+ for(const d of destinations)for(const turbo of [false,true]){
+  const skilled=run(42,'skilled',1,844,turbo,90,d.at);
+  const passive=[0,1,2].map(l=>run(42,'passive',l,844,turbo,90,d.at));
+  assert(skilled.time>=80,JSON.stringify({d:d.name,skilled}));assert(skilled.time>Math.max(...passive.map(p=>p.time)),JSON.stringify({d:d.name,skilled,passive}));
+  console.log(JSON.stringify({destination:d.name,turbo,skilled:skilled.time,passive:passive.map(p=>p.time)}));
+ }
+});
 test('Endless route requires active steering and preserves reachable fuel',()=>{
  for(const h of [667,844])for(const turbo of [false,true])for(const seed of [1,2,7,42,2026]){
   const passive=[0,1,2].map(l=>run(seed,'passive',l,h,turbo,300));
