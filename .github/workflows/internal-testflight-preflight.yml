@@ -1,0 +1,41 @@
+name: Internal TestFlight packaging preflight (unsigned)
+on:
+  push:
+    branches: [engineering/internal-testflight-handoff]
+permissions:
+  contents: read
+jobs:
+  unsigned-preflight:
+    runs-on: xcode-27
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check standard toolchain and prepare test-only icon
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          command -v xcodegen >/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          bash -n ios/prepare-testflight.sh
+          python3 - <<'PY'
+          import struct,zlib,pathlib
+          def chunk(t,d):
+              return struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d)&0xffffffff)
+          data=b'\x89PNG\r\n\x1a\n'
+          data+=chunk(b'IHDR',struct.pack('>IIBBBBB',1024,1024,8,2,0,0,0))
+          data+=chunk(b'IDAT',zlib.compress((b'\0'+b'\x12\x34\x56'*1024)*1024))
+          data+=chunk(b'IEND',b'')
+          pathlib.Path('/tmp/test-only-icon.png').write_bytes(data)
+          PY
+      - name: Compile non-distributable fixture-icon build
+        run: bash ios/prepare-testflight.sh /tmp/test-only-icon.png 3
+      - name: Verify Xcode supports internal-only distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -help > /tmp/xcode-help.txt 2>&1
+          grep -F 'testFlightInternalTestingOnly' /tmp/xcode-help.txt
+          echo 'Fixture icon was only for validating the asset pipeline. No upload, no signing, no private artifact.'
