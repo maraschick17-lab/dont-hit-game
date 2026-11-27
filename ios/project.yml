@@ -1,0 +1,57 @@
+name: RushToOrbit
+options:
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "4.22"
+    CURRENT_PROJECT_VERSION: "5"
+targets:
+  RushToOrbit:
+    type: application
+    platform: iOS
+    sources:
+      - path: App/AppDelegate.swift
+      - path: App/Assets.xcassets
+      - path: App/Web
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.maraschick.rushtoorbit
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: RUSH TO ORBIT
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Game
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+  RushToOrbitUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: RushToOrbit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.maraschick.rushtoorbit.uitests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  RushToOrbit:
+    build:
+      targets:
+        RushToOrbit: all
+        RushToOrbitUITests: [test]
+    test:
+      targets: [RushToOrbitUITests]
