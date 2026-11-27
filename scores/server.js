@@ -6,6 +6,19 @@ import {validStage} from './score-limits.mjs';
 const order = 'points DESC, milliseconds ASC, id ASC';
 const origin = 'https://dont-hit-game.onrender.com';
 
+// Keep legacy payloads compatible; explicitly reject non-standard/assisted runs.
+// This is a routing safeguard, not cryptographic proof of play.
+function standardRun(run) {
+  return run && typeof run === 'object' && !Array.isArray(run) &&
+    Object.keys(run).every(k => ['id','initials','stages','mode','assisted'].includes(k)) &&
+    (!Object.hasOwn(run,'mode') || run.mode === 'standard') &&
+    (!Object.hasOwn(run,'assisted') || run.assisted === false) &&
+    Array.isArray(run.stages) && run.stages.every(s =>
+      s && typeof s === 'object' && !Array.isArray(s) &&
+      Object.keys(s).length === 3 &&
+      Object.keys(s).every(k => ['stage','score','ms'].includes(k)));
+}
+
 export async function createBoard(db) {
   await db.query(`CREATE TABLE IF NOT EXISTS campaign_scores (
     id uuid PRIMARY KEY, initials varchar(3) NOT NULL,
@@ -35,7 +48,7 @@ export async function createBoard(db) {
       }
       let run;
       try { run = JSON.parse(body); } catch { return reply(400, {}); }
-      if (!run || typeof run.initials !== 'string' || !/^[A-Z0-9]{1,3}$/.test(run.initials) ||
+      if (!standardRun(run) || typeof run.initials !== 'string' || !/^[A-Z0-9]{1,3}$/.test(run.initials) ||
           typeof run.id !== 'string' || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(run.id) ||
           !Array.isArray(run.stages) || run.stages.length !== 4) return reply(400, {});
       const valid = run.stages.every(validStage);
