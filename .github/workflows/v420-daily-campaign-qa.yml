@@ -1,0 +1,24 @@
+name: Validate daily campaign
+on:
+  push:
+    branches: [engineering/v4.20-daily-campaign]
+permissions:
+  contents: read
+jobs:
+  mobile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test test.cjs tests/moving-traffic.cjs tests/lane-mileage.cjs tests/endless-fuel-route.cjs
+      - run: npm install --no-save --no-package-lock playwright@1.51.1
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/connectivity-mobile.cjs
+      - run: node tests/lane-mileage-touch.cjs
+      - run: node tests/endless-orbit-smoke.cjs
+      - run: node tests/sequential-mobile-smoke.cjs
+
+      - run: node tests/daily-campaign-mobile.cjs

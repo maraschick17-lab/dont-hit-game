@@ -2,9 +2,43 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 const html=fs.readFileSync('index.html','utf8');
 const code=html.slice(html.indexOf('const TRAFFIC_SPEED_RATIO='),html.indexOf('function loop(now)'));
 assert(code.includes('function updateTraffic'));
-function setup(stage=0){const c=vm.createContext({stage,objects:[],elapsed:0,stageProgress:5,speed:500,H:844,Math});vm.runInContext(code,c);return c}
+const dailyCode=html.slice(html.indexOf('function dailyDate('),html.indexOf('function dailyRecords('));
+assert(dailyCode.includes('function dailySeed')&&dailyCode.includes('function dailyRandom'));
+function setup(stage=0,dailyCampaign=null,random=Math.random){
+  const math=Object.create(Math);math.random=random;
+  const c=vm.createContext({stage,dailyCampaign,dailyState:0,objects:[],elapsed:0,stageProgress:5,speed:500,H:844,Math:math});
+  vm.runInContext(dailyCode+'\n'+code,c);
+  if(dailyCampaign)c.dailyState=c.dailySeed(dailyCampaign,stage);
+  return c;
+}
 test('moving traffic closes at 20 percent at cruise and turbo in first three stages',()=>{for(let s=0;s<3;s++){const c=setup(s);for(let speed of [350,1000]){c.speed=speed;assert.ok(Math.abs(c.trafficClosingFactor({type:'car',shift:true})*speed-speed*.2)<1e-8)}}});
 test('rocket has unchanged closing speed and cannot swap',()=>{const c=setup(3),o={type:'car',lane:1,y:60,shift:true};c.objects=[o];assert.equal(c.trafficClosingFactor(o),1);c.updateTraffic(o,650);assert.equal(o.dest,undefined)});
 test('signal then smooth adjacent change, both lanes reserved',()=>{const c=setup(),o={type:'car',lane:1,y:60,shift:true};c.objects=[o];c.updateTraffic(o,650);assert.equal(Math.abs(o.dest-1),1);const dest=o.dest;assert(c.trafficReserves(o,1));assert(c.trafficReserves(o,dest));c.elapsed=.59;c.updateTraffic(o,650);assert.equal(o.lane,1);c.elapsed=.60;c.updateTraffic(o,650);c.elapsed=.925;c.updateTraffic(o,650);assert.ok(Math.abs(o.lane-(1+dest)/2)<1e-8);c.elapsed=1.26;c.updateTraffic(o,650);assert.equal(o.lane,dest);assert.equal(o.dest,undefined);assert(o.changed)});
 test('protected fuel lane and other traffic prevent swap; finish prevents new swaps',()=>{const c=setup(),o={type:'car',lane:1,y:60,shift:true};c.objects=[o,{type:'coin',lane:1,y:200}];c.updateTraffic(o,650);assert.equal(o.dest,undefined);c.objects=[o,{type:'car',lane:0,y:80},{type:'car',lane:2,y:80}];c.updateTraffic(o,650);assert.equal(o.dest,undefined);c.objects=[o];c.stageProgress=27;c.updateTraffic(o,650);assert.equal(o.dest,undefined)});
 test('new obstruction cancels signal before lateral motion',()=>{const c=setup(),o={type:'car',lane:1,y:60,shift:true};c.objects=[o];c.updateTraffic(o,650);c.objects.push({type:'coin',lane:o.dest,y:200});c.elapsed=.3;c.updateTraffic(o,650);assert.equal(o.dest,undefined);assert.equal(o.lane,1)});
+
+test('normal traffic uses ordinary randomness, not a daily roll',()=>{
+  for(const roll of [0,.99]){
+    const c=setup(0,null,()=>roll),o={type:'car',lane:1,y:60,shift:true,dailyShift:1-roll};
+    c.objects=[o];c.updateTraffic(o,650);
+    assert.equal(o.dest,roll<.5?0:2);
+  }
+});
+test('daily traffic uses seeded spawn turn roll, without ambient randomness',()=>{
+  const destinations=new Set();
+  for(let stage=0;stage<3;stage++){
+    for(let day=1;day<=28;day++){
+      const date='2026-11-'+String(day).padStart(2,'0');
+      const run=()=>{
+        const c=setup(stage,date,()=>{throw new Error('daily traffic used ambient randomness')});
+        const rolls=Array.from({length:7},()=>c.dailyRandom());
+        const turnRoll=rolls[6],o={type:'car',lane:1,y:60,shift:true,dailyShift:turnRoll};
+        c.objects=[o];c.updateTraffic(o,650);
+        assert.equal(o.dest,turnRoll<.5?0:2);
+        return o.dest;
+      };
+      const dest=run();assert.equal(run(),dest);destinations.add(dest);
+    }
+  }
+  assert.deepEqual([...destinations].sort(),[0,2]);
+});
