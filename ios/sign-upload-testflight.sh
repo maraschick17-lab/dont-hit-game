@@ -30,7 +30,7 @@ security cms -D -i "$tmp/profile.mobileprovision" > "$tmp/profile.plist"
 profile_uuid="$(python3 - "$tmp/profile.plist" <<'PY'
 import plistlib,datetime,re,sys
 p=plistlib.load(open(sys.argv[1],'rb')); e=p['Entitlements']
-assert p['Name']=='Rush to Orbit App Store'
+assert isinstance(p.get('Name'),str) and p['Name'].strip() and not any(ord(c)<32 for c in p['Name'])
 assert p['TeamIdentifier']==['TFNH5R2U6N']
 assert e['application-identifier']=='TFNH5R2U6N.com.maraschick.rushtoorbit'
 assert not e.get('get-task-allow',False)
@@ -40,6 +40,8 @@ assert re.fullmatch(r'[0-9a-fA-F-]{36}',p['UUID'])
 print(p['UUID'])
 PY
 )"
+profile_name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$tmp/profile.plist")"
+[[ -n "$profile_name" ]]
 security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
 security set-keychain-settings -lut 3600 "$keychain"
 security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
@@ -61,7 +63,7 @@ for dir in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Dev
   cp "$tmp/profile.mobileprovision" "$dir/$profile_uuid.mobileprovision"
 done
 rm -f "$tmp/cert.p12" "$tmp/profile.mobileprovision" "$tmp/profile.plist" "$tmp/identities"
-xcodebuild -project ios/RushToOrbit.xcodeproj -scheme RushToOrbit -configuration Release -destination 'generic/platform=iOS' -archivePath "$tmp/RushToOrbit.xcarchive" CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$fingerprint" DEVELOPMENT_TEAM=TFNH5R2U6N PROVISIONING_PROFILE_SPECIFIER='Rush to Orbit App Store' archive
+xcodebuild -project ios/RushToOrbit.xcodeproj -scheme RushToOrbit -configuration Release -destination 'generic/platform=iOS' -archivePath "$tmp/RushToOrbit.xcarchive" CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$fingerprint" DEVELOPMENT_TEAM=TFNH5R2U6N PROVISIONING_PROFILE_SPECIFIER="$profile_name" archive
 app="$tmp/RushToOrbit.xcarchive/Products/Applications/RushToOrbit.app"
 codesign --verify --deep --strict "$app"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")" == com.maraschick.rushtoorbit ]]
@@ -69,9 +71,9 @@ codesign --verify --deep --strict "$app"
 [[ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Info.plist")" == 4.14 ]]
 for asset in index.html leaderboard.js manifest.webmanifest icon.svg; do cmp "$asset" "$app/Web/$asset"; done
 test -s "$app/Assets.car"
-python3 - "$tmp/export.plist" "$fingerprint" <<'PY'
+python3 - "$tmp/export.plist" "$fingerprint" "$profile_name" <<'PY'
 import plistlib,sys
-p={'method':'app-store-connect','destination':'upload','teamID':'TFNH5R2U6N','signingStyle':'manual','signingCertificate':sys.argv[2],'provisioningProfiles':{'com.maraschick.rushtoorbit':'Rush to Orbit App Store'},'testFlightInternalTestingOnly':True,'manageAppVersionAndBuildNumber':False,'uploadSymbols':True}
+p={'method':'app-store-connect','destination':'upload','teamID':'TFNH5R2U6N','signingStyle':'manual','signingCertificate':sys.argv[2],'provisioningProfiles':{'com.maraschick.rushtoorbit':sys.argv[3]},'testFlightInternalTestingOnly':True,'manageAppVersionAndBuildNumber':False,'uploadSymbols':True}
 with open(sys.argv[1],'wb') as f: plistlib.dump(p,f)
 PY
 xcodebuild -exportArchive -archivePath "$tmp/RushToOrbit.xcarchive" -exportPath "$tmp/export" -exportOptionsPlist "$tmp/export.plist" -authenticationKeyPath "$tmp/AuthKey_$ASC_KEY_ID.p8" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" -allowProvisioningUpdates
