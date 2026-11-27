@@ -3,3 +3,6 @@ App/Web/
 App/Info.plist
 DerivedData/
 *.xcresult
+
+project-distribution.yml
+DeviceDerivedData/

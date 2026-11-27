@@ -89,11 +89,14 @@ jobs:
         run: |
           set -euo pipefail
           xcodebuild -project ios/RushToOrbit.xcodeproj -scheme RushToOrbit -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath ios/DerivedData CODE_SIGNING_ALLOWED=NO build
-      - name: Compile unsigned device Release configuration (not distribution signed)
+      - name: Exercise actual distribution preflight (unsigned, no secrets)
         shell: bash
         run: |
           set -euo pipefail
-          xcodebuild -project ios/RushToOrbit.xcodeproj -scheme RushToOrbit -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath ios/DeviceDerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+          # Deliberately different local marker: never reserved or uploaded to Apple.
+          bash ios/release/prepare-distribution.sh "$PWD/ios/approved-app-icon.png" 500001
+          # Restore the regular simulator project before the native regression suite.
+          (cd ios && xcodegen generate --spec project.yml)
       - name: Preserve unsigned physical-device binary for inspection
         shell: bash
         run: |

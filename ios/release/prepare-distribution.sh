@@ -2,7 +2,7 @@
 # Run in a fresh owner-controlled checkout on macOS. No signing or upload here.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-[[ $# == 2 ]] || { echo 'Usage: bash ios/prepare-testflight.sh /absolute/path/to/approved-icon.png unused-build-number' >&2; exit 2; }
+[[ $# == 2 ]] || { echo 'Usage: bash ios/release/prepare-distribution.sh /absolute/path/to/approved-icon.png unused-build-number' >&2; exit 2; }
 icon="$1"
 build="$2"
 [[ "$icon" = /* && -f "$icon" ]] || { echo 'An absolute path to the Dot-approved icon PNG is required.' >&2; exit 2; }
@@ -42,10 +42,10 @@ replace('CURRENT_PROJECT_VERSION: "5"', 'CURRENT_PROJECT_VERSION: "'+sys.argv[2]
 replace('        TARGETED_DEVICE_FAMILY: "1"','        TARGETED_DEVICE_FAMILY: "1"\n        DEVELOPMENT_TEAM: TFNH5R2U6N\n        CODE_SIGN_STYLE: Automatic')
 pathlib.Path('ios/project-distribution.yml').write_text(s)
 PY
-(cd ios && xcodegen generate --spec project-testflight.yml)
+(cd ios && xcodegen generate --spec project-distribution.yml)
 # No credentials or provisioning access; unsigned compilation only.
-xcodebuild -project ios/RushToOrbit.xcodeproj -scheme RushToOrbit -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath ios/TestFlightDerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
-app=ios/TestFlightDerivedData/Build/Products/Release-iphoneos/RushToOrbit.app
+xcodebuild -project ios/RushToOrbit.xcodeproj -scheme RushToOrbit -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath ios/DeviceDerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+app=ios/DeviceDerivedData/Build/Products/Release-iphoneos/RushToOrbit.app
 for asset in index.html leaderboard.js manifest.webmanifest icon.svg reachability.txt; do
   cmp "$asset" "$app/Web/$asset" || { echo "Bundle asset mismatch: $asset" >&2; exit 1; }
 done
