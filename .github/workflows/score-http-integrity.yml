@@ -7,14 +7,31 @@ permissions:
 jobs:
   isolated:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: rto_fixture
+          POSTGRES_PASSWORD: disposable_fixture_only
+          POSTGRES_DB: rto_fixture
+        ports:
+          - 54329:5432
+        options: >-
+          --health-cmd "pg_isready -U rto_fixture -d rto_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     defaults:
       run:
         working-directory: scores
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - run: npm ci --ignore-scripts
       - run: node --test score-limits.test.mjs score-http.test.mjs
+      - name: Actual legacy client payloads and disposable PostgreSQL
+        run: node --test score-postgres.test.mjs
