@@ -1,0 +1,20 @@
+name: Validate isolated score HTTP integrity
+on:
+  push:
+    branches: [engineering/score-http-integrity]
+permissions:
+  contents: read
+jobs:
+  isolated:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: scores
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts
+      - run: node --test score-limits.test.mjs score-http.test.mjs
