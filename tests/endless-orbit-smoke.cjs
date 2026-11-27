@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),{chromium,devices}=require('playwright');
 const html=fs.readFileSync('index.html','utf8');
-const injection="window.__orbitQA={complete:()=>{stageProgress=30},state:()=>({running,stage,unlocked:orbitUnlocked(),endless:endless&&{...endless,fuel},playerPos,targetPos,records:orbitRecords(),livery:orbitLivery().id}),advance:()=>{endless.distance=16;orbitStep(.02)},hit:()=>{endless.rocks=[{lane:playerPos,y:H*playerY-100,oldY:H*playerY-100,hp:1,max:1,angle:0}];endless.shots=[{x:playerPos,y:H*playerY-75}];orbitStep(.04)},drain:()=>{fuel=0}};draw()})();";
+const injection="window.__orbitQA={complete:()=>{stageProgress=30},state:()=>({running,stage,unlocked:orbitUnlocked(),endless:endless&&{...endless,fuel},playerPos,targetPos,records:orbitRecords(),livery:orbitLivery().id}),advance:(distance=16)=>{endless.distance=distance;orbitStep(.02)},hit:()=>{endless.rocks=[{lane:playerPos,y:H*playerY-100,oldY:H*playerY-100,hp:1,max:1,angle:0}];endless.shots=[{x:playerPos,y:H*playerY-75}];orbitStep(.04)},drain:()=>{fuel=0}};draw()})();";
 (async()=>{const browser=await chromium.launch({headless:true,args:['--autoplay-policy=no-user-gesture-required']});
 try{for(const device of ['iPhone 13','iPhone SE']){
  const context=await browser.newContext({...devices[device],defaultBrowserType:'chromium',reducedMotion:'reduce'}),page=await context.newPage(),errors=[];
@@ -24,5 +24,10 @@ try{for(const device of ['iPhone 13','iPhone SE']){
  await page.locator('#endless').click();await page.waitForFunction(()=>window.__orbitQA.state().running);
  await page.evaluate(()=>window.__orbitQA.drain());await page.locator('#orbitGarage').waitFor({state:'visible'});
  await page.reload();assert.equal(await page.evaluate(()=>window.__orbitQA.state().livery),'lunar');assert.equal(await page.locator('#endless').count(),1);
- assert((await page.evaluate(()=>window.__orbitQA.state())).records.destroyed>=1);assert.deepEqual(errors,[]);console.log(device+': unlock, cannon, asteroid hit, milestone, depletion, records and reload passed');await context.close();
+ assert((await page.evaluate(()=>window.__orbitQA.state())).records.destroyed>=1);await page.locator('#endless').click();await page.waitForFunction(()=>window.__orbitQA.state().running);
+ for(const [i,at] of [0,16,38,65,98,137,182,233,290,355,430,520].entries()){
+  await page.evaluate(at=>window.__orbitQA.advance(at),at);await page.waitForTimeout(100);
+  const q=await page.evaluate(()=>window.__orbitQA.state());assert.equal(q.endless.region,Math.min(i,10));assert(q.running);assert(q.endless.shots.length<=36);
+ }
+ assert.deepEqual(errors,[]);console.log(device+': unlock, cannon, asteroid hit, milestone, depletion, records and reload passed');await context.close();
 }}finally{await browser.close()}})().catch(e=>{console.error(e);process.exitCode=1});
