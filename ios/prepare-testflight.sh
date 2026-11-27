@@ -41,15 +41,25 @@ def replace(old,new):
 replace('CURRENT_PROJECT_VERSION: "2"', 'CURRENT_PROJECT_VERSION: "'+sys.argv[2]+'"')
 replace('      - path: App/AppDelegate.swift','      - path: App/AppDelegate.swift\n      - path: App/Assets.xcassets')
 replace('        TARGETED_DEVICE_FAMILY: "1"','        TARGETED_DEVICE_FAMILY: "1"\n        DEVELOPMENT_TEAM: TFNH5R2U6N\n        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon\n        CODE_SIGN_STYLE: Automatic')
+replace('        CFBundleDisplayName: RUSH TO ORBIT','        CFBundleDisplayName: RUSH TO ORBIT\n        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"\n        CFBundleShortVersionString: "$(MARKETING_VERSION)"')
 pathlib.Path('ios/project-testflight.yml').write_text(s)
 PY
 (cd ios && xcodegen generate --spec project-testflight.yml)
 # No credentials or provisioning access; unsigned compilation only.
 xcodebuild -project ios/RushToOrbit.xcodeproj -scheme RushToOrbit -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath ios/TestFlightDerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
 app=ios/TestFlightDerivedData/Build/Products/Release-iphoneos/RushToOrbit.app
-cmp index.html "$app/Web/index.html"
-cmp leaderboard.js "$app/Web/leaderboard.js"
-test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")" = com.maraschick.rushtoorbit
-test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Info.plist")" = "$build"
-test -f "$app/Assets.car"
+for asset in index.html leaderboard.js manifest.webmanifest icon.svg; do
+  cmp "$asset" "$app/Web/$asset" || { echo "Bundle asset mismatch: $asset" >&2; exit 1; }
+done
+assert_plist() {
+  local key="$1" expected="$2" actual
+  actual="$(/usr/libexec/PlistBuddy -c "Print $key" "$app/Info.plist")"
+  [[ "$actual" == "$expected" ]] || { echo "Bundle metadata mismatch: $key expected=$expected actual=$actual" >&2; exit 1; }
+  echo "Verified $key: $actual"
+}
+assert_plist CFBundleIdentifier com.maraschick.rushtoorbit
+assert_plist CFBundleVersion "$build"
+assert_plist CFBundleShortVersionString 4.14
+test -s "$app/Assets.car" || { echo 'Missing compiled asset catalog' >&2; exit 1; }
+test -s "$app/AppIcon60x60@2x.png" || { echo 'Missing compiled iPhone icon' >&2; exit 1; }
 echo 'Unsigned preflight complete; not installable. In owner-authenticated Xcode choose Product > Archive, then Distribute App > TestFlight Internal Only. Never commit generated files or signing assets.'
