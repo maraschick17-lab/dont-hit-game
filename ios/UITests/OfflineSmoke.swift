@@ -230,3 +230,39 @@ final class NativeCampaignSmoke: XCTestCase {
         XCTFail(lastFailure)
     }
 }
+
+
+final class InformationSmoke: XCTestCase {
+    func testPrivacyAndSupportAccessibleOfflineAndAfterGarage() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+        let play = app.buttons["LET'S GO"]
+        XCTAssertTrue(play.waitForExistence(timeout: 25))
+        let privacy = app.buttons["PRIVACY"]
+        let support = app.buttons["SUPPORT"]
+        func open(_ button: XCUIElement, contains phrase: String) {
+            XCTAssertTrue(button.waitForExistence(timeout: 10))
+            if !button.isHittable { app.swipeUp() }
+            XCTAssertTrue(button.isHittable)
+            button.tap()
+            let close = app.buttons["CLOSE INFORMATION"]
+            XCTAssertTrue(close.waitForExistence(timeout: 5))
+            let content = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", phrase)).firstMatch
+            XCTAssertTrue(content.waitForExistence(timeout: 5))
+            if !close.isHittable { app.swipeUp() }
+            XCTAssertTrue(close.isHittable)
+            close.tap()
+            XCTAssertFalse(close.exists)
+        }
+        open(privacy, contains: "No account is required")
+        open(support, contains: "Connect to Wi-Fi or cellular internet")
+        app.buttons["GARAGE"].tap()
+        app.buttons["BACK TO GAME"].tap()
+        open(privacy, contains: "No account is required")
+        app.buttons["PLAY"].tap()
+        XCTAssertTrue(app.buttons["RETRY CONNECTION"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["CLOSE INFORMATION"].exists)
+        app.terminate()
+    }
+}

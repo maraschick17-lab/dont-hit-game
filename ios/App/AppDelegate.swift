@@ -253,6 +253,75 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
         }
         #endif
         config.userContentController.addUserScript(WKUserScript(source: bridge, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+
+        // Bundled native-only information, available without reaching a server.
+        // Keep the public web assets byte-identical and the game engine untouched.
+        let information = #"""
+        (() => {
+          const box = document.getElementById('box');
+          if (!box || document.getElementById('rto-info')) return;
+          const dialog = document.createElement('dialog');
+          dialog.id = 'rto-info';
+          dialog.setAttribute('aria-labelledby','rto-info-title');
+          dialog.style.maxHeight = '80dvh';
+          dialog.style.overscrollBehavior = 'contain';
+          dialog.innerHTML = '<h2 id="rto-info-title"></h2><div id="rto-info-body"></div><button class="alt" type="button" id="rto-info-close">CLOSE INFORMATION</button>';
+          document.body.append(dialog);
+          const title = dialog.querySelector('h2'), body = dialog.querySelector('#rto-info-body');
+          const sections = {
+            'PRIVACY': [
+              'No account is required. Internet is required to start or resume play; the game checks a first-party HTTPS endpoint.',
+              'Settings, unlocks, liveries and personal records are saved on this device. A pending leaderboard submission can remain on the device for retry.',
+              'Posting a standard campaign finish is optional. If you post, your racer initials, random run ID and four stage scores and times are sent to the score service. The public leaderboard shows initials, total points and elapsed time. Do not enter real names or identifying information.',
+              'The score service retains submitted score information for ranking and duplicate prevention. Hosting services process connection information. Deleting the app or clearing local data does not delete a published score.',
+              'This version has no advertising, purchases, third-party analytics SDK or tracking. The published privacy policy and contact for data requests must be finalized before public release.'
+            ],
+            'SUPPORT': [
+              'Connect to Wi-Fi or cellular internet to play. If the game pauses for a connection problem, reconnect and choose Retry Connection.',
+              'If a leaderboard submission fails, retry from the leaderboard. Do not repeatedly submit a different finish to replace a pending one.',
+              'For score concerns, record the racer initials, points and elapsed time. For technical issues, record the device model, iOS version, game version and what happened. Never send passwords or payment information.',
+              'A verified public support contact and score-removal process are required before public release.'
+            ]
+          };
+          let opener;
+          function show(name, button) {
+            if (dialog.open || document.querySelector('dialog[open]')) return;
+            opener = button;
+            title.textContent = name === 'PRIVACY' ? 'Privacy' : 'Support';
+            body.replaceChildren(...sections[name].map(value => {
+              const p = document.createElement('p'); p.textContent = value; return p;
+            }));
+            dialog.showModal();
+            dialog.querySelector('#rto-info-close').focus();
+          }
+          dialog.querySelector('#rto-info-close').addEventListener('click', () => dialog.close());
+          dialog.addEventListener('close', () => { if (opener?.isConnected) opener.focus(); });
+          document.addEventListener('keydown', event => {
+            if (dialog.open && [' ','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','a','d'].includes(event.key)) event.stopImmediatePropagation();
+          }, true);
+          function attach() {
+            // Both original home and the home restored from Garage; never gameplay or stage menus.
+            if (!box.querySelector('#play, #go') || box.querySelector('#rto-info-links')) return;
+            const row = document.createElement('div');
+            row.id = 'rto-info-links';
+            row.style.cssText = 'display:flex;gap:8px;margin-top:6px';
+            for (const name of Object.keys(sections)) {
+              const button = document.createElement('button');
+              button.type = 'button'; button.className = 'alt';
+              button.textContent = name;
+              button.style.cssText = 'min-height:44px;padding:8px 4px;margin-top:0;font-size:13px';
+              button.addEventListener('click', () => show(name, button));
+              row.append(button);
+            }
+            box.append(row);
+          }
+          new MutationObserver(attach).observe(box,{childList:true});
+          attach();
+        })();
+        """#
+        config.userContentController.addUserScript(WKUserScript(source: information,
+            injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+
         config.userContentController.add(self, name: "gameHaptic")
         config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "pendingCampaign")
         config.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "gameSave")

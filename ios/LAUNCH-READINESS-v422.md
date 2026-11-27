@@ -25,3 +25,8 @@ Current Apple minimum Xcode/iOS SDK 26+ (April 28 2026), deployment target iOS 1
 - https://developer.apple.com/app-store/submitting/
 
 Owner-controlled gates: approved support contact and retention/removal procedure; final metadata/disclosures; physical iPhone QA of current release (network loss, touch, audio, haptics, saved records); distribution-eligible archive, export compliance (OS TLS only expected; verify final binary), protected signing review; separate explicit public review approval. No ad SDK or publisher IDs until coordinated. December 5 remains a target, not guaranteed.
+
+## November 27 follow-up: information and signing preparation
+Native-only Privacy and Support menu dialogs are bundled, offline-accessible, and covered by a new XCTest. The local privacy summary is a draft; owner contact, published URLs, host retention and authenticated removal remain release gates. No candidate support address appears in the UI. Replace draft language with final approved policy and functional URL links before public release. No web asset changes.
+
+The separate distribution workflow template under `ios/release/` is deliberately not installed as a runnable Actions workflow. It uses the existing protected testflight environment, requires an owner-approved release-gates file (not present), and exports with `testFlightInternalTestingOnly=false`. Review against the exact final commit and approved URLs before enabling; no signing/upload was initiated. Private upload is distinct from review submission. The installed v4.14 build remains untouched.

@@ -55,6 +55,15 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Validate draft distribution scripts without executing signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n ios/release/prepare-distribution.sh ios/release/sign-upload-distribution.sh
+          grep -Fq "'testFlightInternalTestingOnly':False" ios/release/sign-upload-distribution.sh
+          grep -Fq 'environment: testflight' ios/release/distribution-upload.yml.template
+          test ! -e ios/release/owner-approved-release-gates.json
+          test ! -e .github/workflows/distribution-upload.yml
       - name: Generate unsigned native project
         shell: bash
         run: |
