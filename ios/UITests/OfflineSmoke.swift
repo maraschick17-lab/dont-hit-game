@@ -14,6 +14,7 @@ private func openScoreboard(_ app: XCUIApplication, timeout: TimeInterval = 25) 
 
 final class OfflineSmoke: XCTestCase {
     func testBundledGameAndOfflineScoreboard() throws {
+        continueAfterFailure = false
         let app = XCUIApplication()
         app.launch()
         let play = app.buttons["LET'S GO"]
@@ -23,13 +24,24 @@ final class OfflineSmoke: XCTestCase {
         capture.lifetime = .keepAlways
         add(capture)
 
-        let scores = app.buttons["GLOBAL LEADERBOARD"]
-        XCTAssertTrue(scores.waitForExistence(timeout: 5))
-        scores.tap()
+        openScoreboard(app)
         let unavailable = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Scores unavailable")).firstMatch
         XCTAssertTrue(unavailable.waitForExistence(timeout: 10), "Offline board must fail honestly")
-        app.buttons["BACK"].tap()
-        XCTAssertTrue(play.waitForExistence(timeout: 5))
+        // A prior real campaign can leave a pending finish, making the modal
+        // taller than the viewport. Exercise real scrolling, not JS dismissal.
+        let back = app.buttons["BACK"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        if app.buttons["POST MY FINISH"].exists || !back.isHittable {
+            app.swipeUp()
+        }
+        if !back.isHittable { app.swipeUp() }
+        XCTAssertTrue(back.isHittable, "Leaderboard Back must be reachable with a pending finish")
+        back.tap()
+        let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: back)
+        let didClose = XCTWaiter.wait(for: [closed], timeout: 10) == .completed
+        if !didClose { print("Leaderboard Back did not dismiss after touch: \(app.debugDescription)") }
+        XCTAssertTrue(didClose, "Leaderboard must dismiss before gameplay")
+        XCTAssertTrue(play.waitForExistence(timeout: 10))
         play.tap()
         let hud = app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "ROAD")).firstMatch
         let retry = app.buttons["RETRY CONNECTION"]
