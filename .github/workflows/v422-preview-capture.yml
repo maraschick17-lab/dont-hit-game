@@ -1,0 +1,126 @@
+name: v4.22 native gameplay preview capture (QA only)
+on:
+  pull_request:
+    branches: [engineering/v422-native-release-candidate]
+    paths: ['.github/workflows/v422-preview-capture.yml']
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: a661f368c1c90d441ae7628f1afe79feede95234
+          persist-credentials: false
+      - name: Generate debug simulator project from exact green candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = a661f368c1c90d441ae7628f1afe79feede95234
+          command -v xcodegen >/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          command -v ffmpeg >/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg
+          mkdir -p ios/App/Web ios/App/Assets.xcassets/AppIcon.appiconset /tmp/rto-preview
+          cp index.html leaderboard.js manifest.webmanifest icon.svg reachability.txt ios/App/Web/
+          cp ios/approved-app-icon.png ios/App/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+          python3 - <<'PY'
+          import json,pathlib
+          root=pathlib.Path('ios/App/Assets.xcassets')
+          (root/'Contents.json').write_text(json.dumps({'info':{'author':'xcode','version':1}}))
+          (root/'AppIcon.appiconset/Contents.json').write_text(json.dumps({'images':[{'filename':'AppIcon.png','idiom':'universal','platform':'ios','size':'1024x1024'}],'info':{'author':'xcode','version':1}}))
+          # Only the transient XCTest source changes: capture timing and extra
+          # observation time on earned victory/Endless. No assertions removed.
+          p=pathlib.Path('ios/UITests/OfflineSmoke.swift')
+          s=p.read_text()
+          edits=[
+            ('            add(image)\n        }\n        var lastFailure', '            add(image)\n            print("RTO_PREVIEW_MARK|\\(Date().timeIntervalSince1970)|\\(name)")\n        }\n        var lastFailure'),
+            ('                capture("Native earned victory")', '                capture("Native earned victory")\n                Thread.sleep(forTimeInterval: 5)'),
+            ('                capture("Native earned Endless Orbit")', '                capture("Native earned Endless Orbit")\n                Thread.sleep(forTimeInterval: 6)'),
+          ]
+          for old,new in edits:
+              assert s.count(old)==1,old
+              s=s.replace(old,new)
+          p.write_text(s)
+          PY
+          node ios/qa/native-campaign-driver.cjs ios/App/Web/index.html
+          ! grep -Fq '__nativeCampaignQAEnabled' index.html
+          git diff --exit-code -- index.html leaderboard.js ios/App/AppDelegate.swift ios/project.yml
+          (cd ios && xcodegen generate)
+      - name: Record genuine native simulator gameplay through the earned campaign
+        shell: bash
+        run: |
+          set -euo pipefail
+          device="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for k,v in d.items() if "iOS-" in k for x in v if x["name"]=="iPhone 18 Pro" and x["isAvailable"]))')"
+          xcrun simctl boot "$device" || true
+          xcrun simctl bootstatus "$device" -b
+          xcrun simctl status_bar "$device" override --time "9:41" --dataNetwork wifi --wifiMode active --wifiBars 3 --cellularMode active --cellularBars 4 --batteryState unplugged --batteryLevel 100
+          # Build before recording to avoid capturing unnecessary compiler wait.
+          xcodebuild -project ios/RushToOrbit.xcodeproj -scheme RushToOrbit -configuration Debug -destination "platform=iOS Simulator,id=$device" -derivedDataPath ios/DerivedData CODE_SIGNING_ALLOWED=NO build-for-testing
+          python3 -c 'import time; print(time.time())' > /tmp/rto-preview/start-epoch.txt
+          xcrun simctl io "$device" recordVideo --codec=h264 --force /tmp/rto-preview/native-raw.mov > /tmp/rto-preview/record.log 2>&1 &
+          recorder=$!
+          finish_recording() {
+            kill -INT "$recorder" 2>/dev/null || true
+            wait "$recorder" || true
+          }
+          trap finish_recording EXIT
+          sleep 2
+          kill -0 "$recorder"
+          # Debug simulator score mode is offline; this test uses isolated retention
+          # saves, real reachability, synthetic steering and no score POST.
+          xcodebuild -project ios/RushToOrbit.xcodeproj -scheme RushToOrbit -configuration Debug -destination "platform=iOS Simulator,id=$device" -derivedDataPath ios/DerivedData CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO -only-testing:RushToOrbitUITests/NativeCampaignSmoke/testNativeFourStageCampaignEarnsUnlock test-without-building 2>&1 | tee /tmp/rto-preview/campaign.log
+          finish_recording
+          trap - EXIT
+          test -s /tmp/rto-preview/native-raw.mov
+          grep -F 'Native real-duration campaign passed:' /tmp/rto-preview/campaign.log
+      - name: Assemble muted 25-second preview candidate from real footage
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,pathlib,re,subprocess
+          d=pathlib.Path('/tmp/rto-preview')
+          log=(d/'campaign.log').read_text()
+          matches=re.findall(r'Native real-duration campaign passed: ([0-9.]+) seconds, attempt ([12])',log)
+          assert matches and float(matches[-1][0])>=119.6
+          attempt=matches[-1][1]
+          epoch=float((d/'start-epoch.txt').read_text())
+          marks={name.strip():float(t)-epoch for t,name in re.findall(r'RTO_PREVIEW_MARK\|([0-9.]+)\|([^\r\n]+)',log)}
+          shots=[(f'Native campaign attempt {attempt} stage {i}',7,4.5) for i in range(4)]+[('Native earned victory',0.75,3),('Native earned Endless Orbit',0.75,4)]
+          raw=d/'native-raw.mov'
+          raw_info=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_format','-show_streams','-of','json',str(raw)]))
+          raw_duration=float(raw_info['format']['duration'])
+          segments=[]
+          for n,(name,offset,duration) in enumerate(shots):
+              start=marks[name]+offset
+              assert 0<=start and start+duration<=raw_duration, (name,start,raw_duration)
+              clip=d/f'segment-{n}.mp4'
+              subprocess.run(['ffmpeg','-hide_banner','-loglevel','error','-y','-ss',str(start),'-i',str(raw),'-t',str(duration),'-an','-vf','scale=886:1920:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=886:1920:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30','-c:v','libx264','-profile:v','high','-level:v','4.0','-pix_fmt','yuv420p','-b:v','11M','-maxrate','12M','-bufsize','20M',str(clip)],check=True)
+              segments.append({'name':name,'start':start,'duration':duration,'file':clip.name})
+          (d/'concat.txt').write_text(''.join("file '"+s['file']+"'\n" for s in segments))
+          output=d/'rush-to-orbit-preview-candidate.mp4'
+          subprocess.run(['ffmpeg','-hide_banner','-loglevel','error','-y','-f','concat','-safe','0','-i',str(d/'concat.txt'),'-f','lavfi','-i','anullsrc=channel_layout=stereo:sample_rate=48000','-map','0:v:0','-map','1:a:0','-c:v','copy','-c:a','aac','-b:a','256k','-t','25','-movflags','+faststart',str(output)],check=True)
+          probe=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_format','-show_streams','-of','json',str(output)]))
+          v=next(x for x in probe['streams'] if x['codec_type']=='video')
+          a=next(x for x in probe['streams'] if x['codec_type']=='audio')
+          assert (v['width'],v['height'],v['codec_name'],v['r_frame_rate'])==(886,1920,'h264','30/1')
+          assert v['level']<=40 and a['codec_name']=='aac' and a['channels']==2
+          assert 24.5<=float(probe['format']['duration'])<=25.5
+          (d/'preview-evidence.json').write_text(json.dumps({'source_commit':'a661f368c1c90d441ae7628f1afe79feede95234','campaign_seconds':float(matches[-1][0]),'synthetic_steering':True,'audio':'silent AAC track','requires_visual_review':True,'segments':segments,'probe':probe},indent=2))
+          print('Technical preview candidate passed; visual inspection and final-build confirmation still required.')
+          PY
+      - name: Preserve raw footage and capture diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rto-native-preview-capture
+          path: |
+            /tmp/rto-preview/native-raw.mov
+            /tmp/rto-preview/rush-to-orbit-preview-candidate.mp4
+            /tmp/rto-preview/preview-evidence.json
+            /tmp/rto-preview/start-epoch.txt
+            /tmp/rto-preview/campaign.log
+            /tmp/rto-preview/record.log
+          retention-days: 7
+          if-no-files-found: warn
