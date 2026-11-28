@@ -1,0 +1,209 @@
+name: v4.22 unsigned native release candidate
+on:
+  pull_request:
+    branches: [main]
+    paths: ['ios/**', '.github/workflows/v422-native-release.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  production-read-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 5b4acf4528f8bded657fab2b54e63f38c8423589
+      - name: Match deployed v4.22 public assets against release commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          for asset in index.html leaderboard.js manifest.webmanifest icon.svg reachability.txt; do
+            path="$asset"
+            if [[ "$asset" == index.html ]]; then path=""; fi
+            curl --fail --silent --show-error --location --retry 3 --max-time 30 "https://dont-hit-game.onrender.com/${path}?release=5b4acf4528f8bded657fab2b54e63f38c8423589" -o "/tmp/live-$asset"
+            cmp "$asset" "/tmp/live-$asset"
+            sha256sum "/tmp/live-$asset"
+          done
+          grep -Fq 'v4.22' /tmp/live-index.html
+          grep -Fq '<title>RUSH TO ORBIT</title>' /tmp/live-index.html
+          echo 'Production v4.22 matches all five release assets; GET only.'
+          curl --fail --silent --show-error --max-time 65 https://dont-hit-scores.onrender.com/scores -o /tmp/live-score-read.json
+          python3 -c 'import json; a=json.load(open("/tmp/live-score-read.json")); assert isinstance(a,list) and len(a)<=25 and all(set(r)=={"initials","points","milliseconds"} for r in a); print("Production score GET schema verified, no entries logged")'
+  ios-toolchain:
+    runs-on: xcode-27
+    timeout-minutes: 15
+    steps:
+      - name: Verify free standard runner and distribution SDK readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun --sdk iphonesimulator --show-sdk-version
+          xcrun simctl list devices available
+          sdk="$(xcrun --sdk iphoneos --show-sdk-version)"
+          test "${sdk%%.*}" -ge 27
+          xcodebuild -showsdks
+          echo 'SDK probe only: no signing, no submission, no secrets.'
+
+  ios-simulator:
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify pending score recovery including native storage adapter
+        shell: bash
+        run: node --test tests/leaderboard-recovery.cjs test.cjs
+      - name: Validate draft distribution scripts without executing signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n ios/release/prepare-distribution.sh ios/release/sign-upload-distribution.sh
+          grep -Fq "'testFlightInternalTestingOnly':False" ios/release/sign-upload-distribution.sh
+          grep -Fq 'environment: testflight' ios/release/distribution-upload.yml.template
+          test ! -e ios/release/owner-approved-release-gates.json
+          test ! -e .github/workflows/distribution-upload.yml
+      - name: Generate unsigned native project
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v xcodegen >/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          mkdir -p ios/App/Web
+          cp index.html leaderboard.js manifest.webmanifest icon.svg reachability.txt ios/App/Web/
+          mkdir -p ios/App/Assets.xcassets/AppIcon.appiconset
+          cp ios/approved-app-icon.png ios/App/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+          python3 - <<'PY'
+          import json, pathlib, struct
+          root=pathlib.Path('ios/App/Assets.xcassets')
+          p=root/'AppIcon.appiconset/AppIcon.png'; d=p.read_bytes()
+          assert d[:8]==b'\x89PNG\r\n\x1a\n' and struct.unpack('>IIBB',d[16:26])==(1024,1024,8,2) and b'tRNS' not in d
+          (root/'Contents.json').write_text(json.dumps({'info':{'author':'xcode','version':1}}))
+          (p.parent/'Contents.json').write_text(json.dumps({'images':[{'filename':'AppIcon.png','idiom':'universal','platform':'ios','size':'1024x1024'}],'info':{'author':'xcode','version':1}}))
+          PY
+          cd ios
+          xcodegen generate
+          /usr/libexec/PlistBuddy -c 'Print :UIApplicationSceneManifest:UISceneConfigurations:UIWindowSceneSessionRoleApplication:0:UISceneDelegateClassName' App/Info.plist
+      - name: Build app for simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -project ios/RushToOrbit.xcodeproj -scheme RushToOrbit -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath ios/DerivedData CODE_SIGNING_ALLOWED=NO build
+      - name: Exercise actual distribution preflight (unsigned, no secrets)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Deliberately different local marker: never reserved or uploaded to Apple.
+          bash ios/release/prepare-distribution.sh "$PWD/ios/approved-app-icon.png" 500001
+          # Restore the regular simulator project before the native regression suite.
+          (cd ios && xcodegen generate --spec project.yml)
+      - name: Preserve unsigned physical-device binary for inspection
+        shell: bash
+        run: |
+          set -euo pipefail
+          ditto -c -k --keepParent ios/DeviceDerivedData/Build/Products/Release-iphoneos/RushToOrbit.app /tmp/rush-to-orbit-unsigned-device.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rush-to-orbit-unsigned-device
+          path: /tmp/rush-to-orbit-unsigned-device.zip
+          retention-days: 7
+          if-no-files-found: error
+      - name: Instrument only simulator QA asset for a real-duration native campaign
+        shell: bash
+        run: |
+          set -euo pipefail
+          release=ios/DeviceDerivedData/Build/Products/Release-iphoneos/RushToOrbit.app/Web/index.html
+          cmp index.html "$release"
+          for a in leaderboard.js manifest.webmanifest icon.svg reachability.txt; do cmp "$a" "$(dirname "$release")/$a"; done
+          app="$(dirname "$(dirname "$release")")"
+          test -s "$app/Assets.car"
+          test "$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$app/Info.plist")" = 4.22
+          test "$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$app/Info.plist")" = com.maraschick.rushtoorbit
+          ! grep -Fq '__nativeCampaignQAEnabled' "$release"
+          node ios/qa/native-campaign-driver.cjs ios/App/Web/index.html
+          grep -Fq '__nativeCampaignQAEnabled' ios/App/Web/index.html
+          ! grep -Fq '__nativeCampaignQAEnabled' index.html
+      - name: Checkout exact deployed score validator for isolated tests
+        uses: actions/checkout@v4
+        with:
+          ref: 4b365da019541a05719aa041b1ec8ed83afce075
+          path: ios/qa/score-backend
+          persist-credentials: false
+      - name: Prepare isolated real HTTP score service
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ios/qa/score-backend/scores
+          if [[ -f package-lock.json ]]; then npm ci --ignore-scripts; else npm install --ignore-scripts --no-audit --no-fund; fi
+      - name: Run offline interlock, isolated HTTP and production read-only native UI smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          device="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for k,v in d.items() if "iOS-" in k for x in v if x["name"]=="iPhone 18 Pro" and x["isAvailable"]))')"
+          xcrun simctl boot "$device" || true
+          xcrun simctl bootstatus "$device" -b
+          # Keep the server owned by the test step, with logs even on XCTest failure.
+          node ios/qa/isolated-score-server.mjs > /tmp/rush-isolated-scores.log 2>&1 &
+          server_pid=$!
+          trap 'cat /tmp/rush-isolated-scores.log; kill "$server_pid" 2>/dev/null || true' EXIT
+          ready=0
+          echo "Waiting for isolated score service readiness"
+          for i in {1..30}; do
+            if ! kill -0 "$server_pid" 2>/dev/null; then echo "::error::Isolated score server exited before readiness"; exit 1; fi
+            if curl --max-time 2 --fail --silent http://127.0.0.1:18081/scores | grep -Fxq '[]'; then ready=1; break; fi
+            sleep 1
+          done
+          if [[ "$ready" != 1 ]]; then echo "::error::Isolated score server failed empty-board readiness"; exit 1; fi
+          echo "Isolated score service ready; preparing simulator test"
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" ios/App/Info.plist
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" ios/App/Info.plist
+          test_exit=0
+          echo "Starting XCTest; both UI and isolated backend assertions must pass"
+          xcodebuild -project ios/RushToOrbit.xcodeproj -scheme RushToOrbit -configuration Debug -destination "platform=iOS Simulator,id=$device" -derivedDataPath ios/DerivedData -resultBundlePath ios/NativeSmoke.xcresult CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO test || test_exit=$?
+          # Report bridge receipt and HTTP status/error without logging payloads.
+          xcrun simctl spawn "$device" log show --last 25m --style compact --predicate 'subsystem == "com.maraschick.rushtoorbit.qa"' || true
+          # Check isolated backend even after XCTest failure; both gates must pass.
+          cat /tmp/rush-isolated-scores.log
+          grep -Fxq 'INSERT QA first' /tmp/rush-isolated-scores.log
+          grep -Fxq 'RETRY QA identical' /tmp/rush-isolated-scores.log
+          test "$(grep -c '^INSERT ' /tmp/rush-isolated-scores.log)" = 1
+          curl --fail --silent http://127.0.0.1:18081/scores | python3 -c 'import json,sys; assert json.load(sys.stdin)==[{"initials":"QA","points":6000,"milliseconds":120000}]'
+          test "$test_exit" = 0
+      - name: Export authentic native store screenshot candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun xcresulttool export attachments --path ios/NativeSmoke.xcresult --output-path /tmp/rush-native-attachments
+          python3 ios/qa/export-store-captures.py /tmp/rush-native-attachments ios/StoreCaptureCandidates
+      - name: Preserve unsigned simulator application
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rush-to-orbit-unsigned-simulator
+          path: ios/DerivedData/Build/Products/Debug-iphonesimulator/RushToOrbit.app
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Export native failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          mkdir -p ios/NativeDiagnostics
+          if [[ -d ios/NativeSmoke.xcresult ]]; then
+            xcrun xcresulttool get test-results summary --path ios/NativeSmoke.xcresult > ios/NativeDiagnostics/summary.json || true
+            xcrun xcresulttool export diagnostics --path ios/NativeSmoke.xcresult --output-path ios/NativeDiagnostics/exported || true
+          fi
+      - name: Preserve native test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rush-to-orbit-native-smoke
+          path: |
+            ios/NativeSmoke.xcresult
+            ios/NativeDiagnostics/
+            ios/StoreCaptureCandidates/
+            /tmp/rush-isolated-scores.log
+          retention-days: 7
+          if-no-files-found: warn

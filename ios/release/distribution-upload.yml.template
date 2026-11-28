@@ -1,0 +1,46 @@
+name: Distribution-eligible private upload (owner approval)
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: Unused positive integer Apple build number
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: rush-to-orbit-testflight
+  cancel-in-progress: false
+jobs:
+  internal-upload:
+    if: github.ref == 'refs/heads/engineering/v422-native-release-candidate'
+    runs-on: xcode-27
+    environment: testflight
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify reviewed build and approved artwork
+        env:
+          BUILD_NUMBER: ${{ inputs.build_number }}
+        run: |
+          set -euo pipefail
+          test -f ios/release/owner-approved-release-gates.json
+          git ls-files --error-unmatch ios/approved-app-icon.png >/dev/null
+          command -v xcodegen >/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          bash -n ios/release/sign-upload-distribution.sh
+          bash ios/release/prepare-distribution.sh "$PWD/ios/approved-app-icon.png" "$BUILD_NUMBER"
+          xcodebuild -help > "$RUNNER_TEMP/rto-xcode-help.txt" 2>&1
+          grep -qF testFlightInternalTestingOnly "$RUNNER_TEMP/rto-xcode-help.txt"
+      - name: Sign and upload distribution-eligible private build
+        env:
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: bash ios/release/sign-upload-distribution.sh

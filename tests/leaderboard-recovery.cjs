@@ -20,7 +20,8 @@ function harness(seed=null,native=false){
   const requests=[];let post=async()=>{throw Error('timeout')};
   const document={querySelector:()=>dialog,createElement:()=>new El(),addEventListener(){}};
   const window=native?{rushNativePending:{get:()=>saved,set:v=>{saved=v}}}:{};
-  vm.runInNewContext(source,{window,document,localStorage:{getItem:()=>saved,setItem:(k,v)=>{saved=v},removeItem:()=>{saved=null}},crypto:{randomUUID:()=>String(++id)},fetch:async(url,opts)=>{requests.push(opts);return opts.method==='POST'?post():{ok:true,json:async()=>[]}},AbortController,setTimeout:()=>0,clearTimeout(){}});
+  const storage=native?{getItem(){throw Error('file storage unavailable')},setItem(){throw Error('file storage unavailable')},removeItem(){throw Error('file storage unavailable')}}:{getItem:()=>saved,setItem:(k,v)=>{saved=v},removeItem:()=>{saved=null}};
+  vm.runInNewContext(source,{window,document,localStorage:storage,crypto:{randomUUID:()=>String(++id)},fetch:async(url,opts)=>{requests.push(opts);return opts.method==='POST'?post():{ok:true,json:async()=>[]}},AbortController,setTimeout:()=>0,clearTimeout(){}});
   return {window,input,submit,form,status,dialog,requests,discard:form.children[2],cancel:form.children[3],saved:()=>JSON.parse(saved),setPost:fn=>{post=fn},submitNow:()=>form.onsubmit({preventDefault(){}})};
 }
 test('failed POST survives new campaign and retries identical payload',async()=>{
@@ -61,4 +62,12 @@ test('unattempted finish can be replaced and invalid campaign cannot replace it'
 });
 test('rejection retains attempted run until player decides, no automatic retry',async()=>{
  const h=harness();h.window.rememberCampaign(stages(1000));h.input.value='A';h.setPost(async()=>({status:400,ok:false}));await h.submitNow();assert.equal(h.saved().initials,'A');assert.match(h.status.textContent,/rejected/);assert.equal(h.requests.length,1);
+});
+
+test('native file-backed retry survives relaunch and a newer finish without web storage',async()=>{
+ const h=harness(null,true);h.window.rememberCampaign(stages(1000));h.input.value='QA';await h.submitNow();
+ const original=h.saved();assert.equal(original.initials,'QA');
+ const next=harness(original,true);next.window.rememberCampaign(stages(1200));assert.deepEqual(next.saved(),original);
+ next.setPost(async()=>({ok:true,json:async()=>({position:1})}));await next.submitNow();
+ assert.equal(next.requests[0].body,h.requests[0].body);assert.equal(next.saved().stages[0].score,1200);assert.equal(next.saved().initials,undefined);
 });
