@@ -94,6 +94,23 @@ final class IsolatedScoreSmoke: XCTestCase {
 
         openBoard("-seed-isolated-valid")
         _ = status("First place is open.")
+        // Exercise the keyboard fix independently of campaign-driver success.
+        // This fixture is confined to the isolated service; no score is posted here.
+        let initials = app.textFields["Racer initials"]
+        let back = app.buttons["BACK"]
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(initials.waitForExistence(timeout: 5))
+        XCTAssertFalse(keyboard.exists, "Opening the board must not raise the initials keyboard")
+        initials.tap()
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 8))
+        XCTAssertTrue(back.isHittable)
+        XCTAssertLessThan(back.frame.midY, keyboard.frame.minY)
+        back.tap()
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: back)
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 10), .completed)
+        openScoreboard(app)
+        XCTAssertTrue(app.buttons["POST MY FINISH"].exists, "Closing the board must preserve the pending finish")
+        _ = status("First place is open.")
         post()
         _ = status("Your run is saved for another try.")
         app.terminate()
@@ -213,8 +230,20 @@ final class NativeCampaignSmoke: XCTestCase {
             var completed = true
             for (stage, label) in ["ROAD", "SEA", "AIR", "SPACE"].enumerated() {
                 let hud = app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
-                guard hud.waitForExistence(timeout: 8) else {
-                    lastFailure = "missing stage \(stage) HUD"
+                // Each stage uses the real first-party HTTPS gate. A transient
+                // probe failure must be observable; retry only through its actual
+                // enabled button, exactly as a connected player would.
+                var enteredStage = hud.waitForExistence(timeout: 8)
+                let retry = app.buttons["RETRY CONNECTION"]
+                if retry.exists && retry.isEnabled && retry.isHittable {
+                    print("Native campaign stage \(stage) exposed connectivity retry; UI tree: \(app.debugDescription)")
+                    retry.tap()
+                    enteredStage = hud.waitForExistence(timeout: 8) && !retry.exists
+                }
+                guard enteredStage && !retry.exists else {
+                    lastFailure = "missing stage \(stage) HUD or connectivity gate still visible"
+                    capture("Native campaign missing HUD attempt \(attempt) stage \(stage)")
+                    print("Native campaign transition failure: \(app.debugDescription)")
                     completed = false
                     break
                 }
