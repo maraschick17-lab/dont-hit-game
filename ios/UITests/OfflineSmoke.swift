@@ -31,10 +31,21 @@ final class OfflineSmoke: XCTestCase {
         // taller than the viewport. Exercise real scrolling, not JS dismissal.
         let back = app.buttons["BACK"]
         XCTAssertTrue(back.waitForExistence(timeout: 5))
-        if app.buttons["POST MY FINISH"].exists || !back.isHittable {
-            app.swipeUp()
+        // WebKit may focus the visible initials input when the dialog opens.
+        // The native keyboard then covers Back even when XCTest reports it
+        // hittable. Dismiss the real keyboard via its accessory Done button.
+        func dismissInitialsKeyboard() {
+            let done = app.toolbars.buttons["Done"].firstMatch
+            if done.exists {
+                XCTAssertTrue(done.isHittable, "Initials keyboard Done must be reachable")
+                done.tap()
+                let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: done)
+                XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 8), .completed, "Initials keyboard must dismiss")
+            }
         }
-        if !back.isHittable { app.swipeUp() }
+        dismissInitialsKeyboard()
+        if !back.isHittable { app.swipeUp(); dismissInitialsKeyboard() }
+        if !back.isHittable { app.swipeUp(); dismissInitialsKeyboard() }
         XCTAssertTrue(back.isHittable, "Leaderboard Back must be reachable with a pending finish")
         back.tap()
         let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: back)
