@@ -243,6 +243,29 @@ final class NativeCampaignSmoke: XCTestCase {
                 XCTAssertGreaterThanOrEqual(duration, 119.6, "All four stages must finish in real game time")
                 XCTAssertTrue(endless.exists, "Victory must earn Endless Orbit")
                 capture("Native earned victory")
+                // A real, unposted finish must not autofocus initials or trap
+                // the player behind the software keyboard. Exercise actual
+                // taps, including Back while the keyboard is still open.
+                let board = app.buttons["POST SCORE / LEADERBOARD"]
+                XCTAssertTrue(board.waitForExistence(timeout: 5))
+                if !board.isHittable { app.swipeUp() }
+                XCTAssertTrue(board.isHittable)
+                board.tap()
+                let back = app.buttons["BACK"]
+                XCTAssertTrue(back.waitForExistence(timeout: 8))
+                let field = app.textFields["Racer initials"]
+                XCTAssertTrue(field.waitForExistence(timeout: 5))
+                let keyboard = app.keyboards.firstMatch
+                XCTAssertFalse(keyboard.exists, "Opening the board must not raise the initials keyboard")
+                field.tap()
+                XCTAssertTrue(keyboard.waitForExistence(timeout: 8), "Tapping initials should raise the keyboard")
+                XCTAssertTrue(back.isHittable, "Back must remain accessible while editing initials")
+                XCTAssertLessThan(back.frame.midY, keyboard.frame.minY, "Back must be above the keyboard")
+                back.tap()
+                let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: back)
+                XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 10), .completed, "Back must close with the keyboard open")
+                XCTAssertTrue(win.waitForExistence(timeout: 5))
+                XCTAssertTrue(board.exists, "Closing must return to the earned victory")
                 print("Native real-duration campaign passed: \(duration) seconds, attempt \(attempt)")
                 Thread.sleep(forTimeInterval: 1)
                 app.terminate()
