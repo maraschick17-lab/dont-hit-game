@@ -127,7 +127,7 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
         if isolatedScores && ProcessInfo.processInfo.arguments.contains("-seed-isolated-valid") {
             fixtureSeed = """
             savePending(JSON.stringify({
-              id:'00000000-0000-4000-8000-000000000001', initials:'QA',
+              id:'00000000-0000-4000-8000-000000000001',
               stages:[0,1,2,3].map(stage => ({stage,score:1500,ms:30000}))
             }));
             """

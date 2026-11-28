@@ -95,14 +95,20 @@ final class IsolatedScoreSmoke: XCTestCase {
         openBoard("-seed-isolated-valid")
         _ = status("First place is open.")
         // Exercise the keyboard fix independently of campaign-driver success.
-        // This fixture is confined to the isolated service; no score is posted here.
+        // The valid fixture is an unposted finish: initials must be editable.
+        // A previously attempted finish is read-only by design.
         let initials = app.textFields["Racer initials"]
         let back = app.buttons["BACK"]
         let keyboard = app.keyboards.firstMatch
         XCTAssertTrue(initials.waitForExistence(timeout: 5))
         XCTAssertFalse(keyboard.exists, "Opening the board must not raise the initials keyboard")
+        XCTAssertTrue(initials.isHittable, "Unposted initials must be reachable")
         initials.tap()
-        XCTAssertTrue(keyboard.waitForExistence(timeout: 8))
+        let keyboardOpened = keyboard.waitForExistence(timeout: 8)
+        if !keyboardOpened { print("Editable initials did not open keyboard: \(app.debugDescription)") }
+        XCTAssertTrue(keyboardOpened, "Unposted initials must raise the software keyboard")
+        initials.typeText("QA")
+        XCTAssertEqual(initials.value as? String, "QA", "Actual keyboard input must reach the editable field")
         XCTAssertTrue(back.isHittable)
         XCTAssertLessThan(back.frame.midY, keyboard.frame.minY)
         back.tap()
@@ -111,12 +117,17 @@ final class IsolatedScoreSmoke: XCTestCase {
         openScoreboard(app)
         XCTAssertTrue(app.buttons["POST MY FINISH"].exists, "Closing the board must preserve the pending finish")
         _ = status("First place is open.")
+        XCTAssertEqual(app.textFields["Racer initials"].value as? String, "QA", "Closing the modal must preserve the unposted initials")
         post()
         _ = status("Your run is saved for another try.")
         app.terminate()
         // No fixture seed on relaunch: the original pending payload must survive.
         openBoard()
         _ = status("Top campaign finishes")
+        let savedInitials = app.textFields["Racer initials"]
+        XCTAssertEqual(savedInitials.value as? String, "QA", "Retry must retain original initials")
+        savedInitials.tap()
+        XCTAssertFalse(keyboard.exists, "Attempted finish must not open an editable keyboard")
         post()
         _ = status("Your global rank: #1")
         XCTAssertFalse(app.buttons["POST MY FINISH"].exists)
