@@ -86,6 +86,23 @@ final class IsolatedScoreSmoke: XCTestCase {
         _ = status("Top campaign finishes")
         post()
         _ = status("This finish was rejected.")
+        let discard = app.buttons["DISCARD SAVED FINISH"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 10))
+        if !discard.isHittable { app.swipeUp() }
+        XCTAssertTrue(discard.isHittable)
+        discard.tap()
+        XCTAssertTrue(app.buttons["KEEP SAVED FINISH"].waitForExistence(timeout: 5))
+        app.buttons["KEEP SAVED FINISH"].tap()
+        XCTAssertTrue(app.buttons["POST MY FINISH"].exists, "Cancel must preserve the pending finish")
+        discard.tap()
+        app.buttons["CONFIRM DISCARD SAVED FINISH"].tap()
+        _ = status("Saved retry discarded on this device.")
+        XCTAssertFalse(app.buttons["POST MY FINISH"].exists)
+        Thread.sleep(forTimeInterval: 1)
+        app.terminate()
+        openBoard()
+        _ = status("Top campaign finishes")
+        XCTAssertFalse(app.buttons["POST MY FINISH"].exists, "Native discard must persist after relaunch")
         app.terminate()
     }
 }

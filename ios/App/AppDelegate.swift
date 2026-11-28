@@ -278,7 +278,7 @@ final class GameController: UIViewController, WKNavigationDelegate, WKScriptMess
             ],
             'SUPPORT': [
               'Connect to Wi-Fi or cellular internet to play. If the game pauses for a connection problem, reconnect and choose Retry Connection.',
-              'If a leaderboard submission fails, retry from the leaderboard. Do not repeatedly submit a different finish to replace a pending one.',
+              'If a leaderboard submission fails, retry the saved finish from the leaderboard, or explicitly discard it on this device. Discarding a retry does not delete an already published score.',
               'For score concerns, record the racer initials, points and elapsed time. For technical issues, record the device model, iOS version, game version and what happened. Never send passwords or payment information.',
               'A verified public support contact and score-removal process are required before public release.'
             ]

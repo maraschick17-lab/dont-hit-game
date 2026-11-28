@@ -1,6 +1,6 @@
 # Rush to Orbit — v4.22 launch readiness, November 27, 2026
 
-Unsigned candidate only. Web baseline 2211671ad76d8bc416ee5fe1fd30b2e49a83e0be; deployed score revision 4b365da019541a05719aa041b1ec8ed83afce075. Preserve private TestFlight 4.14(4). Version 4.22/build 5 is an unsigned marker, not an allocated Apple build. Reconfirm unused build number before signing. No public submission, upload, signing, ad activation or paid resources. Full native tests and new captures pending CI. Internal-only archive is not public-release eligible.
+Unsigned candidate only. Web baseline 5b4acf4528f8bded657fab2b54e63f38c8423589; deployed score revision 4b365da019541a05719aa041b1ec8ed83afce075. Preserve private TestFlight 4.14(4). Version 4.22/build 5 is an unsigned marker, not an allocated Apple build. Reconfirm unused build number before signing. No public submission, upload, signing, ad activation or paid resources. Full native tests and new captures pending CI. Internal-only archive is not public-release eligible.
 
 ## Store copy draft, conditional on native QA
 Name: Rush to Orbit
@@ -30,3 +30,6 @@ Owner-controlled gates: approved support contact and retention/removal procedure
 Native-only Privacy and Support menu dialogs are bundled, offline-accessible, and covered by a new XCTest. The local privacy summary is a draft; owner contact, published URLs, host retention and authenticated removal remain release gates. No candidate support address appears in the UI. Replace draft language with final approved policy and functional URL links before public release. No web asset changes.
 
 The separate distribution workflow template under `ios/release/` is deliberately not installed as a runnable Actions workflow. It uses the existing protected testflight environment, requires an owner-approved release-gates file (not present), and exports with `testFlightInternalTestingOnly=false`. Review against the exact final commit and approved URLs before enabling; no signing/upload was initiated. Private upload is distinct from review submission. The installed v4.14 build remains untouched.
+
+## November 28 leaderboard recovery sync
+The production web retry correction preserves an attempted finish and its original initials/ID across later finishes. Explicit discard is local only; a newer finish is held for the current session. Native storage retains the existing atomic file adapter and null tombstone. New regression coverage verifies this adapter without web storage and native UI cancellation/discard across relaunch. Full candidate CI is required again; prior native results do not certify this updated revision.

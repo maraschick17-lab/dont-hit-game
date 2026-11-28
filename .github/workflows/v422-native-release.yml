@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 2211671ad76d8bc416ee5fe1fd30b2e49a83e0be
+          ref: 5b4acf4528f8bded657fab2b54e63f38c8423589
       - name: Match deployed v4.22 public assets against release commit
         shell: bash
         run: |
@@ -21,7 +21,7 @@ jobs:
           for asset in index.html leaderboard.js manifest.webmanifest icon.svg reachability.txt; do
             path="$asset"
             if [[ "$asset" == index.html ]]; then path=""; fi
-            curl --fail --silent --show-error --location --retry 3 --max-time 30 "https://dont-hit-game.onrender.com/${path}?release=2211671ad76d8bc416ee5fe1fd30b2e49a83e0be" -o "/tmp/live-$asset"
+            curl --fail --silent --show-error --location --retry 3 --max-time 30 "https://dont-hit-game.onrender.com/${path}?release=5b4acf4528f8bded657fab2b54e63f38c8423589" -o "/tmp/live-$asset"
             cmp "$asset" "/tmp/live-$asset"
             sha256sum "/tmp/live-$asset"
           done
@@ -55,6 +55,9 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Verify pending score recovery including native storage adapter
+        shell: bash
+        run: node --test tests/leaderboard-recovery.cjs test.cjs
       - name: Validate draft distribution scripts without executing signing
         shell: bash
         run: |

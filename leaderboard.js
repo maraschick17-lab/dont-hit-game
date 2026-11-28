@@ -9,8 +9,22 @@
   const notice = document.createElement('small');
   notice.textContent = 'Initials are public. Use a nickname, not your real name.';
   form.append(notice);
+  const pendingNotice = document.createElement('p');
+  pendingNotice.setAttribute('aria-live', 'polite');
+  const discard = document.createElement('button');
+  discard.type = 'button';
+  discard.className = 'alt';
+  const cancelDiscard = document.createElement('button');
+  cancelDiscard.type = 'button';
+  cancelDiscard.className = 'alt';
+  cancelDiscard.textContent = 'KEEP SAVED FINISH';
+  form.append(pendingNotice, discard, cancelDiscard);
   let posting = false;
   let pending;
+  // The current save key and wire payload remain unchanged. A newer finish is
+  // held only for this session until the player resolves the older attempt.
+  let newerFinish = null;
+  let confirmingDiscard = false;
   const nativePending = window.rushNativePending;
   try { pending = JSON.parse(nativePending ? nativePending.get() : localStorage.getItem('dh_pending_campaign')); } catch {}
   function persist(run) {
@@ -25,8 +39,42 @@
     form.hidden = !pending;
     input.readOnly = !!pending?.initials || posting;
     if (pending?.initials) input.value = pending.initials;
-    submit.disabled = posting;
+    submit.disabled = posting || confirmingDiscard;
+    discard.disabled = posting;
+    discard.textContent = confirmingDiscard
+      ? (newerFinish ? 'CONFIRM REPLACE SAVED FINISH' : 'CONFIRM DISCARD SAVED FINISH')
+      : (newerFinish ? 'USE NEWER FINISH INSTEAD' : 'DISCARD SAVED FINISH');
+    cancelDiscard.hidden = !confirmingDiscard;
+    pendingNotice.textContent = confirmingDiscard
+      ? 'This removes the saved retry on this device only. It does not remove a score already accepted by the server.'
+      : newerFinish
+        ? 'An earlier attempted finish is saved for retry. Your newer finish is available until you leave or reload the game; choose which to post.'
+        : pending?.initials ? 'Your attempted finish is saved with the original initials for safe retry.' : '';
   }
+  function resolvePending() {
+    const replacement = newerFinish;
+    newerFinish = null;
+    confirmingDiscard = false;
+    input.value = '';
+    persist(replacement);
+    syncForm();
+  }
+  discard.onclick = () => {
+    if (!pending || posting) return;
+    if (!confirmingDiscard) {
+      confirmingDiscard = true;
+      syncForm();
+      return;
+    }
+    resolvePending();
+    // No request is made. A previously accepted score remains on the board.
+    ++generation;
+    status.textContent = pending ? 'Newer finish selected. Post only if you choose.' : 'Saved retry discarded on this device.';
+  };
+  cancelDiscard.onclick = () => {
+    confirmingDiscard = false;
+    syncForm();
+  };
   async function request(options = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 65000);
@@ -36,9 +84,18 @@
   }
   window.rememberCampaign = stages => {
     if (stages.length !== 4 || !stages.every((stage, index) => stage.stage === index)) return;
-    persist({id:crypto.randomUUID(), stages:stages.map(s => ({
+    const finish = {id:crypto.randomUUID(), stages:stages.map(s => ({
       stage:s.stage, score:s.score, ms:Math.round(s.seconds * 1000)
-    }))});
+    }))};
+    if (pending?.initials || posting) {
+      // Never silently replace an ambiguous earlier POST with a new UUID.
+      newerFinish = finish;
+    } else {
+      input.value = '';
+      persist(finish);
+    }
+    confirmingDiscard = false;
+    syncForm();
   };
   let generation = 0;
   async function show(message = '') {
@@ -64,7 +121,7 @@
   }
   form.onsubmit = async event => {
     event.preventDefault();
-    if (!pending || posting) return;
+    if (!pending || posting || confirmingDiscard) return;
     const initials = pending.initials || input.value.trim().toUpperCase();
     if (!/^[A-Z0-9]{1,3}$/.test(initials)) { status.textContent = 'Enter 1–3 letters or digits.'; return; }
     // Keep an identical payload after a timeout, including across reloads.
@@ -78,14 +135,14 @@
       const result = await request({method:'POST', headers:{'Content-Type':'application/json'},
         body:JSON.stringify(run)});
       if (result.status === 400 || result.status === 409) {
-        status.textContent = 'This finish was rejected. Complete a new campaign to post another score.';
+        status.textContent = 'This finish was rejected. Discard the saved finish or choose your newer finish if available.';
         return;
       }
       if (!result.ok) throw Error();
       const {position} = await result.json();
       if (!Number.isInteger(position) || position < 1) throw Error();
-      if (pending?.id === run.id) persist(null);
-      if (dialog.open) await show('Your global rank: #' + position);
+      if (pending?.id === run.id) resolvePending();
+      if (dialog.open) await show('Your global rank: #' + position + (pending ? '. Your newer finish is ready to post if you choose.' : ''));
     } catch {
       status.textContent = 'Score could not be posted. Your run is saved for another try.';
     } finally { posting = false; syncForm(); }
@@ -94,4 +151,6 @@
     if (e.target.closest('[data-scores]')) show();
   });
   dialog.querySelector('[data-close]').onclick = () => dialog.close();
+  dialog.addEventListener('close', () => { confirmingDiscard = false; syncForm(); });
+  syncForm();
 })();
